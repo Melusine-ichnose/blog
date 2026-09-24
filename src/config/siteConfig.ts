@@ -48,8 +48,8 @@ export const siteConfig: SiteConfig = {
 	subtitle: "项目实战 · 源码学习",
 
 	// 站点 URL
-	// TODO: 部署后替换为你的真实域名（如 https://your-name.pages.dev 或自定义域名）
-	site_url: "https://blog.example.com",
+	// 已部署到 Cloudflare Pages
+	site_url: "https://blog-tyb.pages.dev",
 
 	// 站点描述
 	description:
