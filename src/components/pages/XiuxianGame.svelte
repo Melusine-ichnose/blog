@@ -1,70 +1,97 @@
 <script lang="ts">
-// 修仙修炼游戏核心组件 v3
-// 创角（灵根选择 + 体质转盘）+ 持续打坐 + 雷劫渡劫 + 心魔劫 + 丹药体系
+// 修仙修炼游戏核心组件 v4
+// 三转盘创角（资质/灵根/体质，仿蛊真人体系）+ 持续打坐 + 雷劫渡劫
+// 事件系统：心魔劫、妖兽来袭、坊市奇遇、道友论道、灵脉喷发
+// 丹药体系：按境界解锁炼制，收益恒大于成本
 // 数据存储在 localStorage，纯前端实现
 
 import { onDestroy } from "svelte";
 
 // ==================== 类型定义 ====================
 
-/** 境界定义 */
 interface Realm {
 	name: string;
 	level: number;
 	requiredXp: number;
 	description: string;
-	/** 突破至此境界是否触发雷劫（金丹期及以后） */
-	thunderTrial: boolean;
+	thunderTrial: boolean; // 突破至此境界是否触发雷劫
 }
 
-/** 丹药定义 */
+type PillId = "juqi" | "ningshen" | "pojing" | "tianyuan" | "wudao" | "jiuzhuan";
+
 interface Pill {
 	id: PillId;
 	name: string;
 	color: string;
 	desc: string;
 	cost: number;
+	minRealm: number; // 炼制所需最低境界 index
 }
 
-type PillId = "juqi" | "ningshen" | "pojing" | "tianyuan";
-
-/** 灵根定义 */
-interface SpiritRoot {
+/** 资质（蛊真人甲乙丙丁） */
+interface Aptitude {
 	id: string;
 	name: string;
 	color: string;
 	desc: string;
+	weight: number;
+	xpMult: number;
+	breakBonus: number;
+	fortuneBonus: number; // 机缘概率加成
 }
 
-/** 体质定义（转盘产出） */
+/** 灵根组合（凡人修仙传体系：越少越纯） */
+interface RootCombo {
+	id: string;
+	name: string;
+	count: number; // 灵根数量
+	mult: number; // 单项灵根效果倍率
+	weight: number;
+	desc: string;
+	allEventBonus?: number; // 伪灵根的全事件概率加成
+}
+
+interface RootElement {
+	id: string;
+	name: string;
+	color: string;
+}
+
+/** 体质（仿蛊真人十绝体：强大但多有缺陷） */
 interface Physique {
 	id: string;
 	name: string;
 	color: string;
 	desc: string;
-	weight: number; // 转盘权重
-	xpMult: number; // 修为收益倍率
-	breakBonus: number; // 突破/渡劫成功率加成
-	demonProbDelta: number; // 心魔概率增减
-	thunderLossMult: number; // 雷劫失败损失倍率
+	weight: number;
+	xpMult: number;
+	breakBonus: number;
+	demonProbDelta: number;
+	thunderLossMult: number;
+	fortuneMult?: number; // 机缘概率倍率
+	demonImmune?: boolean; // 心魔免疫
+	battleBonus?: number; // 战斗胜率加成
 }
 
-/** 玩家状态 */
 interface PlayerState {
 	xp: number;
 	realmIndex: number;
 	lastBreakthrough: string | null;
-	totalBreaths: number; // 累计打坐息数
+	totalBreaths: number;
 	pills: Record<PillId, number>;
-	ningshenLeft: number; // 凝神丹剩余加成息数
-	pojingActive: boolean; // 破境丹 buff（下次突破生效）
-	spiritualRoot: string | null; // 灵根 id，null 表示未创角
-	physique: string | null; // 体质 id
-	thunderPassed: number; // 累计渡过天雷数
+	ningshenLeft: number; // 凝神丹剩余息数
+	wudaoLeft: number; // 悟道丹剩余息数（机缘×3）
+	veinLeft: number; // 灵脉剩余息数（收益×3）
+	pojingActive: boolean;
+	aptitude: string | null; // 资质 id
+	rootCombo: string | null; // 灵根组合 id
+	spiritualRoots: string[]; // 五行灵根 id 数组
+	physique: string | null;
+	thunderPassed: number;
+	battlesWon: number; // 累计战胜妖兽数
 	log: LogEntry[];
 }
 
-/** 日志条目 */
 interface LogEntry {
 	time: string;
 	message: string;
@@ -73,7 +100,6 @@ interface LogEntry {
 
 // ==================== 常量 ====================
 
-/** 九大境界 */
 const REALMS: Realm[] = [
 	{ name: "炼气期", level: 1, requiredXp: 100, description: "初入修仙之门，吐纳天地灵气", thunderTrial: false },
 	{ name: "筑基期", level: 2, requiredXp: 300, description: "筑基成功，寿元增至两百载", thunderTrial: false },
@@ -86,33 +112,54 @@ const REALMS: Realm[] = [
 	{ name: "飞升境", level: 9, requiredXp: Infinity, description: "飞升仙界，与天地同寿", thunderTrial: true },
 ];
 
-/** 丹药体系 */
+/** 丹药：效果恒大于成本，高阶丹药需对应境界炼制 */
 const PILLS: Pill[] = [
-	{ id: "juqi", name: "聚气丹", color: "#34d399", desc: "服下立即获得 80 点修为", cost: 120 },
-	{ id: "ningshen", name: "凝神丹", color: "#60a5fa", desc: "接下来 30 息修炼收益翻倍", cost: 400 },
-	{ id: "pojing", name: "破境丹", color: "#c084fc", desc: "突破+25%；渡劫时可祭出抵挡一道天雷", cost: 1000 },
-	{ id: "tianyuan", name: "天元丹", color: "#fbbf24", desc: "服下立即获得 600 点修为", cost: 2000 },
+	{ id: "juqi", name: "聚气丹", color: "#34d399", desc: "服下 +120 修为", cost: 50, minRealm: 0 },
+	{ id: "ningshen", name: "凝神丹", color: "#60a5fa", desc: "30 息修炼收益翻倍", cost: 250, minRealm: 1 },
+	{ id: "pojing", name: "破境丹", color: "#c084fc", desc: "突破+25%；渡劫可挡一道天雷", cost: 600, minRealm: 2 },
+	{ id: "tianyuan", name: "天元丹", color: "#fbbf24", desc: "服下 +2500 修为", cost: 1200, minRealm: 3 },
+	{ id: "wudao", name: "悟道丹", color: "#f472b6", desc: "60 息内机缘概率 ×3", cost: 2500, minRealm: 4 },
+	{ id: "jiuzhuan", name: "九转金丹", color: "#fb923c", desc: "服下 +15000 修为", cost: 6000, minRealm: 5 },
 ];
 
-/** 五行灵根（创角时选择） */
-const SPIRIT_ROOTS: SpiritRoot[] = [
-	{ id: "jin", name: "金灵根", color: "#eab308", desc: "锋锐无匹 · 突破与渡劫成功率 +5%" },
-	{ id: "mu", name: "木灵根", color: "#22c55e", desc: "生生不息 · 机缘概率翻倍（6%→12%）" },
-	{ id: "shui", name: "水灵根", color: "#3b82f6", desc: "上善若水 · 打坐修为收益 +20%" },
-	{ id: "huo", name: "火灵根", color: "#ef4444", desc: "焚魔炼心 · 心魔造成的损失减半" },
-	{ id: "tu", name: "土灵根", color: "#a8a29e", desc: "不动如山 · 心魔概率减半（6%→3%）" },
+/** 资质（蛊真人：甲乙丙丁） */
+const APTITUDES: Aptitude[] = [
+	{ id: "jia", name: "甲等资质", color: "#fbbf24", desc: "九成空窍真元 · 修炼+40%，突破+8%", weight: 8, xpMult: 1.4, breakBonus: 0.08, fortuneBonus: 0 },
+	{ id: "yi", name: "乙等资质", color: "#60a5fa", desc: "上等之资 · 修炼+20%", weight: 30, xpMult: 1.2, breakBonus: 0, fortuneBonus: 0 },
+	{ id: "bing", name: "丙等资质", color: "#9ca3af", desc: "中人之姿 · 无加成，稳打稳扎", weight: 42, xpMult: 1, breakBonus: 0, fortuneBonus: 0 },
+	{ id: "ding", name: "丁等资质", color: "#a8a29e", desc: "大器晚成 · 修炼-15%，但机缘+8%", weight: 20, xpMult: 0.85, breakBonus: 0, fortuneBonus: 0.08 },
 ];
 
-/** 体质（创角转盘抽取） */
+/** 五行灵根元素 */
+const ROOT_ELEMENTS: RootElement[] = [
+	{ id: "jin", name: "金", color: "#eab308" },
+	{ id: "mu", name: "木", color: "#22c55e" },
+	{ id: "shui", name: "水", color: "#3b82f6" },
+	{ id: "huo", name: "火", color: "#ef4444" },
+	{ id: "tu", name: "土", color: "#a8a29e" },
+];
+
+/** 灵根组合转盘（凡人体系：灵根越少越精纯） */
+const ROOT_COMBOS: RootCombo[] = [
+	{ id: "tian", name: "天灵根", count: 1, mult: 3, weight: 8, desc: "单一灵根，纯度极致，单项效果 ×3" },
+	{ id: "shuang", name: "双灵根", count: 2, mult: 1.5, weight: 25, desc: "两条灵根相生相辅，单项效果 ×1.5" },
+	{ id: "san", name: "三灵根", count: 3, mult: 1, weight: 40, desc: "寻常修士之资，单项效果 ×1" },
+	{ id: "si", name: "四灵根", count: 4, mult: 0.6, weight: 22, desc: "灵根驳杂，单项效果 ×0.6" },
+	{ id: "wei", name: "伪灵根", count: 5, mult: 0.3, weight: 5, desc: "五行俱全皆不精（×0.3），然悟性惊人：全事件概率 +3%", allEventBonus: 0.03 },
+];
+
+/** 体质转盘（仿蛊真人十绝体：强大而多舛） */
 const PHYSIQUES: Physique[] = [
-	{ id: "fantai", name: "凡体", color: "#9ca3af", desc: "芸芸众生，大道靠己", weight: 50, xpMult: 1, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1 },
-	{ id: "lingti", name: "灵体", color: "#34d399", desc: "天生近道 · 修为收益 +15%", weight: 26, xpMult: 1.15, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1 },
-	{ id: "daoti", name: "道体", color: "#60a5fa", desc: "道韵天成 · 突破与渡劫 +8%", weight: 14, xpMult: 1, breakBonus: 0.08, demonProbDelta: 0, thunderLossMult: 1 },
-	{ id: "hundun", name: "混沌体", color: "#c084fc", desc: "收益 +30%，但心魔概率 +5%（祸福相依）", weight: 8, xpMult: 1.3, breakBonus: 0, demonProbDelta: 0.05, thunderLossMult: 1 },
-	{ id: "daotai", name: "先天道胎", color: "#fbbf24", desc: "万古无一 · 收益 +50%，突破 +10%，雷劫损失减半", weight: 2, xpMult: 1.5, breakBonus: 0.1, demonProbDelta: 0, thunderLossMult: 0.5 },
+	{ id: "fantai", name: "凡体", color: "#9ca3af", desc: "芸芸众生，大道靠己", weight: 40, xpMult: 1, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1 },
+	{ id: "lingti", name: "灵体", color: "#34d399", desc: "天生近道 · 收益 +15%", weight: 20, xpMult: 1.15, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1 },
+	{ id: "zhenwu", name: "大力真武体", color: "#ef4444", desc: "十绝体 · 收益+30%，战妖+15%，但心魔+3%", weight: 10, xpMult: 1.3, breakBonus: 0, demonProbDelta: 0.03, thunderLossMult: 1, battleBonus: 0.15 },
+	{ id: "bingpo", name: "北冥冰魄体", color: "#7dd3fc", desc: "十绝体 · 心魔免疫，但突破 -5%", weight: 8, xpMult: 1, breakBonus: -0.05, demonProbDelta: 0, thunderLossMult: 1, demonImmune: true },
+	{ id: "senhai", name: "森海轮回体", color: "#4ade80", desc: "十绝体 · 机缘翻倍，但打坐收益 -10%", weight: 8, xpMult: 0.9, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1, fortuneMult: 2 },
+	{ id: "daoti", name: "道体", color: "#60a5fa", desc: "道韵天成 · 突破与渡劫 +8%", weight: 8, xpMult: 1, breakBonus: 0.08, demonProbDelta: 0, thunderLossMult: 1 },
+	{ id: "daotai", name: "先天圣体道胎", color: "#fbbf24", desc: "万古无一 · 收益+50%，突破+10%", weight: 4, xpMult: 1.5, breakBonus: 0.1, demonProbDelta: 0, thunderLossMult: 1 },
+	{ id: "zhizun", name: "至尊仙胎体", color: "#e879f9", desc: "仙胎无瑕 · 收益+80%，突破+15%，雷劫损失减半", weight: 2, xpMult: 1.8, breakBonus: 0.15, demonProbDelta: 0, thunderLossMult: 0.5 },
 ];
 
-/** 修炼文案（低频输出，避免刷屏） */
 const CULTIVATE_TEXTS = [
 	"你盘膝而坐，吐纳天地灵气...",
 	"灵气入体，经脉微微发热...",
@@ -122,7 +169,6 @@ const CULTIVATE_TEXTS = [
 	"丹田之中，灵力如江河奔涌...",
 ];
 
-/** 机缘事件：修为倍率 + 概率掉落丹药 */
 const FORTUNE_EVENTS = [
 	{ text: "你发现了一株百年灵药，修为大涨！", xpMultiplier: 3 },
 	{ text: "你在古洞府中领悟了前辈留下的功法，修为大增！", xpMultiplier: 5 },
@@ -131,16 +177,24 @@ const FORTUNE_EVENTS = [
 	{ text: "有高人路过，见你资质不俗，随手点拨了一番！", xpMultiplier: 4 },
 ];
 
-/** 雷劫文案 */
 const THUNDER_TEXTS = [
 	"乌云压顶，第一道天雷轰然劈落！",
 	"雷光如龙，第二道天雷撕裂长空！",
 	"紫霄神雷，第三道天雷携毁天灭地之势砸下！",
 ];
 
+/** 灵根单项效果基数（乘以组合倍率后生效） */
+const ROOT_BASE = {
+	jin: { breakBonus: 0.02 },
+	mu: { fortuneProb: 0.03 },
+	shui: { xpMult: 0.07 },
+	huo: { demonLossCut: 0.15 },
+	tu: { demonProbCut: 0.015 },
+};
+
 // ==================== 状态 ====================
 
-const EMPTY_PILLS: Record<PillId, number> = { juqi: 0, ningshen: 0, pojing: 0, tianyuan: 0 };
+const EMPTY_PILLS: Record<PillId, number> = { juqi: 0, ningshen: 0, pojing: 0, tianyuan: 0, wudao: 0, jiuzhuan: 0 };
 
 let player = $state<PlayerState>({
 	xp: 0,
@@ -149,36 +203,51 @@ let player = $state<PlayerState>({
 	totalBreaths: 0,
 	pills: { ...EMPTY_PILLS },
 	ningshenLeft: 0,
+	wudaoLeft: 0,
+	veinLeft: 0,
 	pojingActive: false,
-	spiritualRoot: null,
+	aptitude: null,
+	rootCombo: null,
+	spiritualRoots: [],
 	physique: null,
 	thunderPassed: 0,
+	battlesWon: 0,
 	log: [],
 });
 
-let isMeditating = $state(false); // 是否持续打坐中
-let lastGain = $state<number | null>(null); // 最近一息获得的修为
-let breathGlow = $state(false); // 打坐呼吸动画开关
+let isMeditating = $state(false);
+let lastGain = $state<number | null>(null);
 let showBreakthroughModal = $state(false);
 let breakthroughResult = $state<"idle" | "success" | "fail">("idle");
-let lastSuccessRate = $state(0); // 弹窗里展示的本次成功率
+let lastSuccessRate = $state(0);
 
-// ---- 创角状态 ----
-let selectedRoot = $state<string | null>(null); // 创角界面已选灵根
-let wheelSpinning = $state(false); // 转盘转动中
-let wheelResult = $state<Physique | null>(null); // 转盘结果
-let wheelIndex = $state(0); // 转盘高亮指针
+// ---- 创角三转盘状态 ----
+type WheelKind = "aptitude" | "root" | "physique";
+let spinningKind = $state<WheelKind | null>(null);
+let aptitudeResult = $state<Aptitude | null>(null);
+let rootComboResult = $state<RootCombo | null>(null);
+let physiqueResult = $state<Physique | null>(null);
+let wheelIndex = $state(0); // 当前转动的转盘高亮指针
 
 // ---- 雷劫状态 ----
 let showThunderModal = $state(false);
-let thunderRound = $state(0); // 当前第几道雷（0=未开始，1-3）
-let thunderResults = $state<("pending" | "pass" | "fail")[]>([]); // 每道雷结果
-let thunderStriking = $state(false); // 雷击动画中
-let thunderPenalty = $state(0); // 雷劫失败累计降低的突破率
+let thunderRound = $state(0);
+let thunderResults = $state<("pending" | "pass" | "fail")[]>([]);
+let thunderStriking = $state(false);
+let thunderPenalty = $state(0);
 
 // ---- 心魔劫状态 ----
 let showDemonModal = $state(false);
 let demonResolving = $state(false);
+
+// ---- 妖兽来袭状态 ----
+let showBeastModal = $state(false);
+let beastResolving = $state(false);
+let beastName = $state("");
+
+// ---- 坊市奇遇状态 ----
+let showMarketModal = $state(false);
+let marketOffer = $state<{ pill: Pill; price: number } | null>(null);
 
 // ==================== 计算属性 ====================
 
@@ -191,41 +260,68 @@ const progressPercent = $derived(
 );
 const canBreakthrough = $derived(Boolean(nextRealm && player.xp >= nextRealm.requiredXp));
 
-/** 是否需要创角（有灵根体质才算完成） */
-const needCreation = $derived(!player.spiritualRoot || !player.physique);
+/** 三项天命都测完才算完成创角 */
+const needCreation = $derived(!player.aptitude || !player.rootCombo || !player.physique);
 
-const currentRoot = $derived(SPIRIT_ROOTS.find((r) => r.id === player.spiritualRoot) ?? null);
+const currentAptitude = $derived(APTITUDES.find((a) => a.id === player.aptitude) ?? null);
+const currentCombo = $derived(ROOT_COMBOS.find((c) => c.id === player.rootCombo) ?? null);
 const currentPhysique = $derived(PHYSIQUES.find((p) => p.id === player.physique) ?? null);
+const comboMult = $derived(currentCombo?.mult ?? 0);
 
-/** 灵根加成辅助 */
-const rootBreakBonus = $derived(player.spiritualRoot === "jin" ? 0.05 : 0);
-const rootXpMult = $derived(player.spiritualRoot === "shui" ? 1.2 : 1);
-const rootFortuneProb = $derived(player.spiritualRoot === "mu" ? 0.12 : 0.06);
-const rootDemonProb = $derived(
-	(player.spiritualRoot === "tu" ? 0.03 : 0.06) + (currentPhysique?.demonProbDelta ?? 0),
-);
-const rootDemonLossMult = $derived(player.spiritualRoot === "huo" ? 0.5 : 1);
+/** 灵根效果（基数 × 组合倍率 × 数量不叠加同种） */
+const hasRoot = (id: string) => player.spiritualRoots.includes(id);
+const rootBreakBonus = $derived(hasRoot("jin") ? ROOT_BASE.jin.breakBonus * comboMult : 0);
+const rootFortuneProb = $derived(hasRoot("mu") ? ROOT_BASE.mu.fortuneProb * comboMult : 0);
+const rootXpMult = $derived(1 + (hasRoot("shui") ? ROOT_BASE.shui.xpMult * comboMult : 0));
+const rootDemonLossMult = $derived(1 - (hasRoot("huo") ? ROOT_BASE.huo.demonLossCut * comboMult : 0));
+const rootDemonProbCut = $derived(hasRoot("tu") ? ROOT_BASE.tu.demonProbCut * comboMult : 0);
 
-/** 突破成功率：目标境界越高越难，保底 30%；灵根/体质/破境丹加成 */
+/** 机缘概率：基础 6% + 木灵根 + 丁等资质 + 伪灵根全事件加成；森海轮回体翻倍；悟道丹 ×3 */
+const fortuneProb = $derived.by(() => {
+	let p = 0.06 + rootFortuneProb + (currentAptitude?.fortuneBonus ?? 0) + (currentCombo?.allEventBonus ?? 0);
+	p *= currentPhysique?.fortuneMult ?? 1;
+	if (player.wudaoLeft > 0) p *= 3;
+	return p;
+});
+
+/** 心魔概率：基础 6% - 土灵根 + 体质增减 + 伪灵根加成；冰魄体免疫 */
+const demonProb = $derived.by(() => {
+	if (currentPhysique?.demonImmune) return 0;
+	let p = 0.06 - rootDemonProbCut + (currentPhysique?.demonProbDelta ?? 0) + (currentCombo?.allEventBonus ?? 0);
+	return Math.max(0, p);
+});
+
+/** 突破成功率：目标越高越难，保底 30% */
 const successRate = $derived.by(() => {
 	if (!nextRealm) return 0;
 	const base = Math.max(0.3, 0.9 - nextRealm.level * 0.06);
 	const bonus =
 		rootBreakBonus +
+		(currentAptitude?.breakBonus ?? 0) +
 		(currentPhysique?.breakBonus ?? 0) +
 		(player.pojingActive ? 0.25 : 0);
 	return Math.min(0.95, base + bonus);
 });
 
-/** 每息基础修为：随境界增长，水灵根与体质加成 */
+/** 每息修为：随境界增长 × 资质 × 水灵根 × 体质；灵脉中 ×3 */
 const breathXp = $derived(
-	Math.round((5 + currentRealm.level * 3) * rootXpMult * (currentPhysique?.xpMult ?? 1)),
+	Math.round(
+		(5 + currentRealm.level * 3) *
+			(currentAptitude?.xpMult ?? 1) *
+			rootXpMult *
+			(currentPhysique?.xpMult ?? 1),
+	),
+);
+
+/** 妖兽战斗胜率 */
+const battleWinRate = $derived(
+	Math.min(0.95, 0.55 + player.realmIndex * 0.05 + (currentPhysique?.battleBonus ?? 0)),
 );
 
 // ==================== 持久化 ====================
 
-const STORAGE_KEY = "xiuxian_save_v3";
-const LEGACY_KEYS = ["xiuxian_save_v2", "xiuxian_save_v1"];
+const STORAGE_KEY = "xiuxian_save_v4";
+const LEGACY_KEYS = ["xiuxian_save_v3", "xiuxian_save_v2", "xiuxian_save_v1"];
 
 function save() {
 	if (typeof localStorage !== "undefined") {
@@ -245,7 +341,7 @@ function load() {
 		}
 		return;
 	}
-	// 迁移旧档：继承修为、境界、丹药，灵根体质需补测
+	// 迁移旧档：继承修为、境界、丹药，天命需重测
 	for (const key of LEGACY_KEYS) {
 		const oldRaw = localStorage.getItem(key);
 		if (oldRaw) {
@@ -257,8 +353,9 @@ function load() {
 				player.totalBreaths = old.totalBreaths ?? old.totalCultivations ?? 0;
 				player.pills = { ...EMPTY_PILLS, ...(old.pills ?? {}) };
 				player.ningshenLeft = old.ningshenLeft ?? 0;
+				player.thunderPassed = old.thunderPassed ?? 0;
 				player.log = old.log ?? [];
-				addLog("检测到旧存档，修为与丹药已继承，请补测灵根与体质。", "warning");
+				addLog("检测到旧存档，修为与丹药已继承。天道重铸，请重测资质、灵根与体质。", "warning");
 				save();
 				return;
 			} catch {
@@ -268,7 +365,6 @@ function load() {
 	}
 }
 
-// 初始化
 load();
 
 // ==================== 游戏逻辑 ====================
@@ -278,96 +374,155 @@ function addLog(message: string, type: LogEntry["type"] = "info") {
 	player.log = [{ time, message, type }, ...player.log].slice(0, 50);
 }
 
-// ---------- 创角：灵根 + 体质转盘 ----------
+// ---------- 创角：三转盘 ----------
 
-function selectRoot(id: string) {
-	if (player.spiritualRoot) return; // 已有灵根不可重选（防刷）
-	selectedRoot = id;
+/** 加权随机抽取 */
+function weightedPick<T extends { weight: number }>(items: T[]): T {
+	const total = items.reduce((s, i) => s + i.weight, 0);
+	let roll = Math.random() * total;
+	for (const item of items) {
+		roll -= item.weight;
+		if (roll <= 0) return item;
+	}
+	return items[0];
 }
 
-/** 转盘：加权随机抽体质，带滚动动画 */
-function spinWheel() {
-	if (wheelSpinning || !selectedRoot || player.physique) return;
-	wheelSpinning = true;
-	wheelResult = null;
+/** 通用转盘动画：快速滚动逐渐减速，停在加权随机结果上 */
+function spinWheelFor<T extends { weight: number }>(
+	kind: WheelKind,
+	items: T[],
+	onDone: (result: T) => void,
+) {
+	if (spinningKind) return;
+	spinningKind = kind;
+	wheelIndex = 0;
 
-	// 加权随机
-	const total = PHYSIQUES.reduce((s, p) => s + p.weight, 0);
-	let roll = Math.random() * total;
-	let result = PHYSIQUES[0];
-	for (const p of PHYSIQUES) {
-		roll -= p.weight;
-		if (roll <= 0) {
-			result = p;
-			break;
-		}
-	}
-	const targetIndex = PHYSIQUES.indexOf(result);
+	const result = weightedPick(items);
+	const targetIndex = items.indexOf(result);
 
-	// 滚动动画：先快速循环，逐渐减速停在结果上
 	let step = 0;
-	const totalSteps = 20 + targetIndex; // 至少滚 4 圈
-	const interval = setInterval(() => {
-		wheelIndex = step % PHYSIQUES.length;
+	const totalSteps = 20 + targetIndex;
+	const tick = () => {
+		wheelIndex = step % items.length;
 		step += 1;
 		if (step > totalSteps) {
-			clearInterval(interval);
 			wheelIndex = targetIndex;
-			wheelSpinning = false;
-			wheelResult = result;
+			spinningKind = null;
+			onDone(result);
+			return;
 		}
-	}, 60 + Math.min(400, step * step * 1.2)); // 越来越慢
+		setTimeout(tick, 60 + Math.min(400, step * step * 1.2));
+	};
+	tick();
 }
 
-/** 确认创角：写入灵根体质 */
+function spinAptitude() {
+	spinWheelFor("aptitude", APTITUDES, (r) => { aptitudeResult = r; });
+}
+
+function spinRootCombo() {
+	spinWheelFor("root", ROOT_COMBOS, (r) => { rootComboResult = r; });
+}
+
+function spinPhysique() {
+	spinWheelFor("physique", PHYSIQUES, (r) => { physiqueResult = r; });
+}
+
+/** 确认创角：灵根按组合数量随机分配五行 */
 function confirmCreation() {
-	if (!selectedRoot || !wheelResult || player.spiritualRoot) return;
-	player.spiritualRoot = selectedRoot;
-	player.physique = wheelResult.id;
-	const root = SPIRIT_ROOTS.find((r) => r.id === selectedRoot);
-	addLog(`天命已定！你身怀「${root?.name}」，测得体质「${wheelResult.name}」。${wheelResult.desc}`, "success");
-	if (player.xp > 0 || player.realmIndex > 0) {
-		addLog("旧日修为犹在，新的修行路就此展开。", "info");
-	} else {
-		addLog("你踏上修仙之路，先从打坐吐纳开始吧。", "info");
+	if (!aptitudeResult || !rootComboResult || !physiqueResult || player.aptitude) return;
+	player.aptitude = aptitudeResult.id;
+	player.rootCombo = rootComboResult.id;
+	player.physique = physiqueResult.id;
+
+	// 随机分配五行灵根（伪灵根=五行俱全）
+	const pool = [...ROOT_ELEMENTS];
+	const picked: string[] = [];
+	for (let i = 0; i < rootComboResult.count; i++) {
+		const idx = Math.floor(Math.random() * pool.length);
+		picked.push(pool.splice(idx, 1)[0].id);
 	}
+	player.spiritualRoots = picked;
+
+	const rootNames = picked.map((id) => ROOT_ELEMENTS.find((e) => e.id === id)?.name).join("、");
+	addLog(
+		`天命已定！资质「${aptitudeResult.name}」· 灵根「${rootComboResult.name}（${rootNames}）」· 体质「${physiqueResult.name}」。`,
+		"success",
+	);
+	addLog(
+		player.xp > 0 || player.realmIndex > 0
+			? "旧日修为犹在，新的修行路就此展开。"
+			: "你踏上修仙之路，先从打坐吐纳开始吧。",
+	);
 	save();
 }
 
-// ---------- 打坐 ----------
+// ---------- 打坐与事件 ----------
 
 /** 每息修炼 tick（持续打坐时每 2 秒触发一次） */
 function breathTick() {
-	// 基础收益 + 随机浮动
 	let xpGain = breathXp + Math.floor(Math.random() * (breathXp * 0.6 + 1));
 
-	// 凝神丹 buff：双倍收益
+	// 凝神丹双倍
 	if (player.ningshenLeft > 0) {
 		xpGain *= 2;
 		player.ningshenLeft -= 1;
 	}
+	// 悟道丹剩余消耗（概率在 fortuneProb 里已算）
+	if (player.wudaoLeft > 0) player.wudaoLeft -= 1;
+	// 灵脉三倍
+	if (player.veinLeft > 0) {
+		xpGain *= 3;
+		player.veinLeft -= 1;
+	}
 
-	// 随机事件
+	// 事件判定（一次 roll，按优先级互斥）
 	const roll = Math.random();
-	if (roll < rootFortuneProb) {
-		// 机缘：修为倍率 + 40% 掉落丹药
+	if (roll < fortuneProb) {
+		// 机缘：修为倍率 + 40% 掉丹（只掉当前境界可炼的）
 		const event = FORTUNE_EVENTS[Math.floor(Math.random() * FORTUNE_EVENTS.length)];
 		xpGain *= event.xpMultiplier;
-		if (Math.random() < 0.4) {
-			const pill = PILLS[Math.floor(Math.random() * PILLS.length)];
+		const available = PILLS.filter((p) => p.minRealm <= player.realmIndex);
+		if (Math.random() < 0.4 && available.length > 0) {
+			const pill = available[Math.floor(Math.random() * available.length)];
 			player.pills[pill.id] += 1;
 			addLog(`${event.text} 并获得一颗「${pill.name}」！`, "success");
 		} else {
 			addLog(event.text, "success");
 		}
-	} else if (roll > 1 - rootDemonProb) {
-		// 心魔劫：暂停打坐，弹出抉择
+	} else if (roll < fortuneProb + demonProb) {
+		// 心魔劫：中断打坐，弹出抉择
 		stopMeditation();
 		showDemonModal = true;
 		demonResolving = false;
 		addLog("心魔骤起！你的打坐被迫中断，必须立刻做出抉择...", "danger");
+	} else if (roll < fortuneProb + demonProb + 0.04) {
+		// 妖兽来袭：中断打坐，战斗抉择
+		stopMeditation();
+		beastName = ["赤炎狼", "碧鳞蟒", "铁背苍熊", "幽冥豹", "金翅雕"][Math.floor(Math.random() * 5)];
+		showBeastModal = true;
+		beastResolving = false;
+		addLog(`一头「${beastName}」盯上了你的洞府！`, "warning");
+	} else if (roll < fortuneProb + demonProb + 0.04 + 0.03) {
+		// 坊市奇遇：六折丹药，可买可走（不打断打坐）
+		const available = PILLS.filter((p) => p.minRealm <= player.realmIndex);
+		if (available.length > 0) {
+			const pill = available[Math.floor(Math.random() * available.length)];
+			marketOffer = { pill, price: Math.floor(pill.cost * 0.6) };
+			stopMeditation();
+			showMarketModal = true;
+			addLog(`云游商贩路过，愿以六折出售「${pill.name}」！`);
+		}
+	} else if (roll < fortuneProb + demonProb + 0.04 + 0.03 + 0.03) {
+		// 道友论道：直接收益，不打断
+		const mult = 2 + Math.floor(Math.random() * 3);
+		xpGain *= mult;
+		addLog(`有道友登门论道，一番印证让你获益匪浅（收益 ×${mult}）！`, "success");
+	} else if (roll < fortuneProb + demonProb + 0.04 + 0.03 + 0.03 + 0.01) {
+		// 灵脉喷发：30 息三倍收益
+		player.veinLeft += 30;
+		addLog("地底灵脉喷发！灵气如潮，30 息内修炼收益 ×3！", "success");
 	} else if (Math.random() < 0.12) {
-		// 普通息低频输出文案，避免日志刷屏
 		addLog(CULTIVATE_TEXTS[Math.floor(Math.random() * CULTIVATE_TEXTS.length)]);
 	}
 
@@ -377,7 +532,8 @@ function breathTick() {
 	save();
 }
 
-/** 心魔劫抉择：挥剑斩之（70% 得双倍收益，失败损修为） */
+// ---------- 心魔劫 ----------
+
 function fightDemon() {
 	if (demonResolving) return;
 	demonResolving = true;
@@ -390,24 +546,76 @@ function fightDemon() {
 		player.xp = Math.max(0, player.xp - loss);
 		addLog(`心魔反噬！你强行压制，损失 ${loss} 点修为。`, "danger");
 	}
-	setTimeout(() => {
-		showDemonModal = false;
-		save();
-	}, 1200);
+	setTimeout(() => { showDemonModal = false; save(); }, 1200);
 }
 
-/** 心魔劫抉择：避其锋芒（无损，打坐保持停止） */
 function avoidDemon() {
 	if (demonResolving) return;
 	demonResolving = true;
 	addLog("你收功避魔，道心无损，待心神平复可再度入定。", "warning");
-	setTimeout(() => {
-		showDemonModal = false;
-		save();
-	}, 800);
+	setTimeout(() => { showDemonModal = false; save(); }, 800);
 }
 
-/** 开始 / 暂停持续打坐 */
+// ---------- 妖兽来袭 ----------
+
+function fightBeast() {
+	if (beastResolving) return;
+	beastResolving = true;
+	if (Math.random() < battleWinRate) {
+		const gain = breathXp * (4 + Math.floor(Math.random() * 4));
+		player.xp += gain;
+		player.battlesWon += 1;
+		// 30% 掉妖丹（随机丹药）
+		if (Math.random() < 0.3) {
+			const available = PILLS.filter((p) => p.minRealm <= player.realmIndex);
+			if (available.length > 0) {
+				const pill = available[Math.floor(Math.random() * available.length)];
+				player.pills[pill.id] += 1;
+				addLog(`你斩杀了「${beastName}」！获 ${gain} 修为，并取其妖丹炼出「${pill.name}」！`, "success");
+			} else {
+				addLog(`你斩杀了「${beastName}」！获 ${gain} 修为！`, "success");
+			}
+		} else {
+			addLog(`你斩杀了「${beastName}」！获 ${gain} 修为！`, "success");
+		}
+	} else {
+		const loss = Math.floor(player.xp * 0.08);
+		player.xp = Math.max(0, player.xp - loss);
+		addLog(`你不敌「${beastName}」，负伤遁走，损失 ${loss} 修为。`, "danger");
+	}
+	setTimeout(() => { showBeastModal = false; save(); }, 1200);
+}
+
+function fleeBeast() {
+	if (beastResolving) return;
+	beastResolving = true;
+	const loss = Math.floor(player.xp * 0.03);
+	player.xp = Math.max(0, player.xp - loss);
+	addLog(`你施展遁术避开了「${beastName}」，耗费 ${loss} 修为。`, "warning");
+	setTimeout(() => { showBeastModal = false; save(); }, 800);
+}
+
+// ---------- 坊市奇遇 ----------
+
+function buyMarketPill() {
+	if (!marketOffer || player.xp < marketOffer.price) return;
+	player.xp -= marketOffer.price;
+	player.pills[marketOffer.pill.id] += 1;
+	addLog(`你以六折价 ${marketOffer.price} 修为购得「${marketOffer.pill.name}」，血赚！`, "success");
+	showMarketModal = false;
+	marketOffer = null;
+	save();
+}
+
+function leaveMarket() {
+	addLog("你婉拒了商贩，对方悻悻离去。");
+	showMarketModal = false;
+	marketOffer = null;
+	save();
+}
+
+// ---------- 打坐开关 ----------
+
 let breathTimer: ReturnType<typeof setInterval> | null = null;
 
 function toggleMeditation() {
@@ -418,7 +626,6 @@ function toggleMeditation() {
 		return;
 	}
 	isMeditating = true;
-	breathGlow = true;
 	breathTimer = setInterval(breathTick, 2000);
 	addLog("你盘膝入定，开始持续吐纳。");
 	save();
@@ -426,29 +633,26 @@ function toggleMeditation() {
 
 function stopMeditation() {
 	isMeditating = false;
-	breathGlow = false;
 	if (breathTimer) {
 		clearInterval(breathTimer);
 		breathTimer = null;
 	}
 }
 
-// 组件销毁时清掉定时器
 onDestroy(() => {
 	stopMeditation();
 });
 
 // ---------- 丹药 ----------
 
-/** 使用丹药 */
 function usePill(pill: Pill) {
 	if (player.pills[pill.id] <= 0) return;
 	player.pills[pill.id] -= 1;
 
 	switch (pill.id) {
 		case "juqi":
-			player.xp += 80;
-			addLog("你服下一颗聚气丹，灵力增长 80 点。", "success");
+			player.xp += 120;
+			addLog("你服下一颗聚气丹，灵力增长 120 点。", "success");
 			break;
 		case "ningshen":
 			player.ningshenLeft += 30;
@@ -459,16 +663,24 @@ function usePill(pill: Pill) {
 			addLog("你服下一颗破境丹，下次突破成功率大增。", "success");
 			break;
 		case "tianyuan":
-			player.xp += 600;
-			addLog("你服下一颗天元丹，修为暴涨 600 点！", "success");
+			player.xp += 2500;
+			addLog("你服下一颗天元丹，修为暴涨 2500 点！", "success");
+			break;
+		case "wudao":
+			player.wudaoLeft += 60;
+			addLog("你服下一颗悟道丹，60 息内机缘概率三倍！", "success");
+			break;
+		case "jiuzhuan":
+			player.xp += 15000;
+			addLog("九转金丹入口即化，修为狂涨 15000 点！！", "success");
 			break;
 	}
 	save();
 }
 
-/** 炼丹坊：用修为兑换丹药 */
+/** 炼丹：需达到对应境界 */
 function buyPill(pill: Pill) {
-	if (player.xp < pill.cost) return;
+	if (player.xp < pill.cost || player.realmIndex < pill.minRealm) return;
 	player.xp -= pill.cost;
 	player.pills[pill.id] += 1;
 	addLog(`你耗费 ${pill.cost} 修为，炼制出一颗「${pill.name}」。`);
@@ -477,13 +689,11 @@ function buyPill(pill: Pill) {
 
 // ---------- 突破与雷劫 ----------
 
-/** 尝试突破：大境界（金丹及以后）先渡三道天雷 */
 function attemptBreakthrough() {
 	if (!canBreakthrough || !nextRealm) return;
 	lastSuccessRate = successRate;
 
 	if (nextRealm.thunderTrial) {
-		// 进入雷劫流程
 		thunderRound = 1;
 		thunderResults = ["pending", "pending", "pending"];
 		thunderPenalty = 0;
@@ -492,11 +702,9 @@ function attemptBreakthrough() {
 		return;
 	}
 
-	// 小境界直接判定
 	doBreakthroughCheck(successRate);
 }
 
-/** 硬抗一道天雷 */
 function tankThunder() {
 	if (thunderStriking || thunderRound < 1 || thunderRound > 3) return;
 	thunderStriking = true;
@@ -517,7 +725,6 @@ function tankThunder() {
 		thunderRound += 1;
 		save();
 
-		// 三道雷渡完，进入最终突破判定
 		if (thunderRound > 3) {
 			setTimeout(() => {
 				showThunderModal = false;
@@ -528,11 +735,10 @@ function tankThunder() {
 	}, 1000);
 }
 
-/** 祭出破境丹抵挡一道天雷（必过，同时消耗突破 buff） */
 function usePillForThunder() {
 	if (thunderStriking || player.pills.pojing <= 0) return;
 	player.pills.pojing -= 1;
-	player.pojingActive = false; // 破境丹被用来挡雷，突破加成失效
+	player.pojingActive = false;
 	thunderStriking = true;
 	setTimeout(() => {
 		thunderResults[thunderRound - 1] = "pass";
@@ -544,18 +750,13 @@ function usePillForThunder() {
 		if (thunderRound > 3) {
 			setTimeout(() => {
 				showThunderModal = false;
-				// 破境丹已消耗，用灵根+体质的基础率判定
-				const baseRate = Math.max(
-					0.15,
-					lastSuccessRate - 0.25 - thunderPenalty, // 去掉破境丹加成
-				);
+				const baseRate = Math.max(0.15, lastSuccessRate - 0.25 - thunderPenalty);
 				doBreakthroughCheck(baseRate);
 			}, 900);
 		}
 	}, 1000);
 }
 
-/** 最终突破判定 */
 function doBreakthroughCheck(rate: number) {
 	const usedPojing = player.pojingActive;
 	player.pojingActive = false;
@@ -572,7 +773,6 @@ function doBreakthroughCheck(rate: number) {
 			breakthroughResult = "success";
 			addLog(`恭喜！你成功突破至 ${REALMS[player.realmIndex].name}！${usedPojing ? "（破境丹之效）" : ""}`, "success");
 		} else {
-			// 突破失败，损失 15% 修为（不清空，保留进度感）
 			const loss = Math.floor(player.xp * 0.15);
 			player.xp = Math.max(0, player.xp - loss);
 			breakthroughResult = "fail";
@@ -582,9 +782,8 @@ function doBreakthroughCheck(rate: number) {
 	}, 2000);
 }
 
-/** 重置存档 */
 function resetGame() {
-	if (!confirm("确定要兵解转世，重新来过吗？（修为、境界、丹药、灵根体质全部清空）")) return;
+	if (!confirm("确定要兵解转世，重新来过吗？（修为、境界、丹药、天命全部清空）")) return;
 	stopMeditation();
 	player = {
 		xp: 0,
@@ -593,19 +792,24 @@ function resetGame() {
 		totalBreaths: 0,
 		pills: { ...EMPTY_PILLS },
 		ningshenLeft: 0,
+		wudaoLeft: 0,
+		veinLeft: 0,
 		pojingActive: false,
-		spiritualRoot: null,
+		aptitude: null,
+		rootCombo: null,
+		spiritualRoots: [],
 		physique: null,
 		thunderPassed: 0,
+		battlesWon: 0,
 		log: [],
 	};
-	selectedRoot = null;
-	wheelResult = null;
+	aptitudeResult = null;
+	rootComboResult = null;
+	physiqueResult = null;
 	addLog("你兵解转世，一缕真灵投入轮回，静待天命重测。", "warning");
 	save();
 }
 
-/** 关闭突破弹窗 */
 function closeModal() {
 	showBreakthroughModal = false;
 	breakthroughResult = "idle";
@@ -614,55 +818,83 @@ function closeModal() {
 
 <div class="xiuxian-game">
 	{#if needCreation}
-		<!-- ========== 创角：灵根选择 + 体质转盘 ========== -->
+		<!-- ========== 创角：三转盘测天命 ========== -->
 		<div class="realm-card creation-card">
-			<h2 class="creation-title">天命初测</h2>
-			<p class="creation-desc">修仙先修命。测一测你的灵根与体质，再踏上修行之路。</p>
+			<h2 class="creation-title">天命三测</h2>
+			<p class="creation-desc">资质、灵根、体质，三者定汝仙途。依次启动转盘，各测天命。</p>
 
-			<!-- 第一步：选灵根 -->
-			<h3 class="creation-step">第一步 · 择灵根</h3>
-			<div class="root-grid">
-				{#each SPIRIT_ROOTS as root (root.id)}
-					<button
-						class="root-item"
-						class:selected={selectedRoot === root.id}
-						onclick={() => selectRoot(root.id)}
+			<!-- 资质转盘 -->
+			<h3 class="creation-step">一测 · 修行资质</h3>
+			<div class="wheel-grid">
+				{#each APTITUDES as a, i (a.id)}
+					<div
+						class="wheel-item"
+						class:highlight={spinningKind === "aptitude" && wheelIndex === i}
+						class:final={aptitudeResult?.id === a.id && spinningKind !== "aptitude"}
 					>
-						<span class="root-orb" style={`background: radial-gradient(circle at 35% 30%, ${root.color}, ${root.color}88)`}></span>
-						<span class="root-name">{root.name}</span>
-						<span class="root-desc">{root.desc}</span>
-					</button>
+						<span class="wheel-name" style={aptitudeResult?.id === a.id && spinningKind !== "aptitude" ? `color: ${a.color}` : ""}>{a.name}</span>
+						<span class="wheel-weight">{a.weight}% 概率</span>
+						<span class="wheel-desc">{a.desc}</span>
+					</div>
 				{/each}
 			</div>
+			{#if !aptitudeResult}
+				<button class="btn spin-btn" disabled={spinningKind !== null} onclick={spinAptitude}>
+					{spinningKind === "aptitude" ? "天机推演中..." : "测资质"}
+				</button>
+			{/if}
 
-			<!-- 第二步：体质转盘 -->
-			<h3 class="creation-step">第二步 · 测体质</h3>
+			<!-- 灵根转盘 -->
+			<h3 class="creation-step">二测 · 灵根多寡</h3>
+			<div class="wheel-grid">
+				{#each ROOT_COMBOS as c, i (c.id)}
+					<div
+						class="wheel-item"
+						class:highlight={spinningKind === "root" && wheelIndex === i}
+						class:final={rootComboResult?.id === c.id && spinningKind !== "root"}
+					>
+						<span class="wheel-name">{c.name}</span>
+						<span class="wheel-weight">{c.weight}% 概率</span>
+						<span class="wheel-desc">{c.desc}</span>
+					</div>
+				{/each}
+			</div>
+			{#if aptitudeResult && !rootComboResult}
+				<button class="btn spin-btn" disabled={spinningKind !== null} onclick={spinRootCombo}>
+					{spinningKind === "root" ? "天机推演中..." : "测灵根"}
+				</button>
+			{/if}
+
+			<!-- 体质转盘 -->
+			<h3 class="creation-step">三测 · 先天体质</h3>
 			<div class="wheel-grid">
 				{#each PHYSIQUES as p, i (p.id)}
 					<div
 						class="wheel-item"
-						class:highlight={wheelSpinning && wheelIndex === i}
-						class:final={wheelResult?.id === p.id && !wheelSpinning}
+						class:highlight={spinningKind === "physique" && wheelIndex === i}
+						class:final={physiqueResult?.id === p.id && spinningKind !== "physique"}
 					>
-						<span class="wheel-name" style={wheelResult?.id === p.id && !wheelSpinning ? `color: ${p.color}` : ""}>{p.name}</span>
+						<span class="wheel-name" style={physiqueResult?.id === p.id && spinningKind !== "physique" ? `color: ${p.color}` : ""}>{p.name}</span>
 						<span class="wheel-weight">{p.weight}% 概率</span>
 						<span class="wheel-desc">{p.desc}</span>
 					</div>
 				{/each}
 			</div>
+			{#if rootComboResult && !physiqueResult}
+				<button class="btn spin-btn" disabled={spinningKind !== null} onclick={spinPhysique}>
+					{spinningKind === "physique" ? "天机推演中..." : "测体质"}
+				</button>
+			{/if}
 
-			<div class="creation-actions">
-				{#if !wheelResult}
-					<button class="btn spin-btn" disabled={!selectedRoot || wheelSpinning} onclick={spinWheel}>
-						{wheelSpinning ? "天机推演中..." : selectedRoot ? "启动体质转盘" : "请先选择灵根"}
-					</button>
-				{:else}
+			<!-- 确认 -->
+			{#if aptitudeResult && rootComboResult && physiqueResult}
+				<div class="creation-actions">
 					<p class="creation-result">
-						灵根「{SPIRIT_ROOTS.find((r) => r.id === selectedRoot)?.name}」 · 体质「{wheelResult.name}」
+						「{aptitudeResult.name}」 · 「{rootComboResult.name}」 · 「{physiqueResult.name}」
 					</p>
 					<button class="btn meditate-btn" onclick={confirmCreation}>天命已定，踏入仙途</button>
-				{/if}
-			</div>
+				</div>
+			{/if}
 		</div>
 	{:else}
 		<!-- ========== 主游戏界面 ========== -->
@@ -673,18 +905,32 @@ function closeModal() {
 				{#if player.ningshenLeft > 0}
 					<span class="buff-badge buff-blue">凝神 ×2 · 余 {player.ningshenLeft} 息</span>
 				{/if}
+				{#if player.wudaoLeft > 0}
+					<span class="buff-badge buff-pink">悟道 ×3 · 余 {player.wudaoLeft} 息</span>
+				{/if}
+				{#if player.veinLeft > 0}
+					<span class="buff-badge buff-green">灵脉 ×3 · 余 {player.veinLeft} 息</span>
+				{/if}
 			</div>
 
-			<!-- 灵根体质标签 -->
+			<!-- 天命标签 -->
 			<div class="talent-row">
-				{#if currentRoot}
-					<span class="talent-tag" style={`border-color: ${currentRoot.color}66; color: ${currentRoot.color}`}>{currentRoot.name}</span>
+				{#if currentAptitude}
+					<span class="talent-tag" style={`border-color: ${currentAptitude.color}66; color: ${currentAptitude.color}`}>{currentAptitude.name}</span>
+				{/if}
+				{#if currentCombo}
+					<span class="talent-tag root-tag">
+						{currentCombo.name}（{player.spiritualRoots.map((id) => ROOT_ELEMENTS.find((e) => e.id === id)?.name).join("")}）
+					</span>
 				{/if}
 				{#if currentPhysique}
 					<span class="talent-tag" style={`border-color: ${currentPhysique.color}66; color: ${currentPhysique.color}`}>{currentPhysique.name}</span>
 				{/if}
 				{#if player.thunderPassed > 0}
-					<span class="talent-tag thunder-tag">已渡天雷 ×{player.thunderPassed}</span>
+					<span class="talent-tag thunder-tag">渡雷 ×{player.thunderPassed}</span>
+				{/if}
+				{#if player.battlesWon > 0}
+					<span class="talent-tag battle-tag">斩妖 ×{player.battlesWon}</span>
 				{/if}
 			</div>
 
@@ -719,15 +965,11 @@ function closeModal() {
 						{#if isMeditating}
 							<span class="status-running">运转周天中 · 每息约 +{lastGain ?? breathXp}</span>
 						{:else}
-							<span class="status-idle">入定可积累修为，心魔来时需抉择</span>
+							<span class="status-idle">入定吐纳 · 途中或有机缘、心魔、妖兽、坊市、论道、灵脉</span>
 						{/if}
 					</div>
 					<button class="btn meditate-btn" class:pause={isMeditating} onclick={toggleMeditation}>
-						{#if isMeditating}
-							暂停打坐
-						{:else}
-							开始打坐
-						{/if}
+						{isMeditating ? "暂停打坐" : "开始打坐"}
 					</button>
 				</div>
 			</div>
@@ -738,7 +980,7 @@ function closeModal() {
 					{nextRealm.thunderTrial ? "渡劫突破" : "尝试突破"} → {nextRealm.name}（成功率 {(successRate * 100).toFixed(0)}%{player.pojingActive ? " · 破境丹已备" : ""}）
 				</button>
 				{#if nextRealm.thunderTrial}
-					<p class="thunder-hint">大境界突破需硬渡三道天雷，每道天雷失败将损失修为并削弱突破之势；破境丹可祭出抵挡一道。</p>
+					<p class="thunder-hint">大境界突破需硬渡三道天雷，每道失败损修为并削弱突破之势；破境丹可祭出抵挡一道。</p>
 				{/if}
 			{:else if nextRealm}
 				<div class="breakthrough-hint">
@@ -759,15 +1001,22 @@ function closeModal() {
 		<div class="pill-card">
 			<div class="pill-header">
 				<h3 class="pill-title">丹药 · 炼丹坊</h3>
-				<span class="pill-subtitle">机缘可获丹，修为可炼丹</span>
+				<span class="pill-subtitle">收益大于成本 · 高阶丹药需对应境界方可炼制</span>
 			</div>
 			<div class="pill-list">
 				{#each PILLS as pill (pill.id)}
-					<div class="pill-item">
+					{@const locked = player.realmIndex < pill.minRealm}
+					<div class="pill-item" class:pill-locked={locked}>
 						<span class="pill-orb" style={`background: radial-gradient(circle at 35% 30%, ${pill.color}, ${pill.color}88)`}></span>
 						<div class="pill-info">
 							<div class="pill-name">{pill.name} <span class="pill-count">×{player.pills[pill.id]}</span></div>
-							<div class="pill-desc">{pill.desc}</div>
+							<div class="pill-desc">
+								{#if locked}
+									需达「{REALMS[pill.minRealm].name}」方可炼制
+								{:else}
+									{pill.desc}
+								{/if}
+							</div>
 						</div>
 						<div class="pill-actions">
 							<button
@@ -779,7 +1028,7 @@ function closeModal() {
 							</button>
 							<button
 								class="btn pill-buy"
-								disabled={player.xp < pill.cost}
+								disabled={locked || player.xp < pill.cost}
 								onclick={() => buyPill(pill)}
 								title="炼制"
 							>
@@ -816,7 +1065,6 @@ function closeModal() {
 				<h3 class="thunder-title">天雷劫 · {nextRealm?.name}</h3>
 				<p class="thunder-sub">三道天雷，道道要命。硬抗凭运，祭丹可解。</p>
 
-				<!-- 三道雷的状态指示 -->
 				<div class="thunder-track">
 					{#each thunderResults as r, i}
 						<div
@@ -868,6 +1116,43 @@ function closeModal() {
 					<button class="btn pill-buy" disabled={demonResolving} onclick={avoidDemon}>
 						避其锋芒（无损收功）
 					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- ========== 妖兽来袭弹窗 ========== -->
+	{#if showBeastModal}
+		<div class="modal-overlay">
+			<div class="modal-content beast-modal" onclick={(e) => e.stopPropagation()}>
+				<h3 class="beast-title">妖兽来袭 · {beastName}</h3>
+				<p class="demon-text">妖兽循着灵气找到了你的洞府。迎战可夺其妖丹精华，遁走则耗费修为。</p>
+				<div class="thunder-actions">
+					<button class="btn breakthrough-btn" disabled={beastResolving} onclick={fightBeast}>
+						拔剑迎战（胜率 {(battleWinRate * 100).toFixed(0)}%）
+					</button>
+					<button class="btn pill-buy" disabled={beastResolving} onclick={fleeBeast}>
+						遁走避战（损 3% 修为）
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- ========== 坊市奇遇弹窗 ========== -->
+	{#if showMarketModal && marketOffer}
+		<div class="modal-overlay">
+			<div class="modal-content market-modal" onclick={(e) => e.stopPropagation()}>
+				<h3 class="market-title">坊市奇遇</h3>
+				<p class="demon-text">
+					云游商贩愿以 <strong class="market-price">{marketOffer.price}</strong> 修为（原价 {marketOffer.pill.cost}）
+					出售「{marketOffer.pill.name}」——{marketOffer.pill.desc}
+				</p>
+				<div class="thunder-actions">
+					<button class="btn breakthrough-btn" disabled={player.xp < marketOffer.price} onclick={buyMarketPill}>
+						{player.xp < marketOffer.price ? "修为不足" : "买下（六折）"}
+					</button>
+					<button class="btn pill-buy" onclick={leaveMarket}>离去</button>
 				</div>
 			</div>
 		</div>
@@ -942,8 +1227,10 @@ function closeModal() {
 	border-radius: 999px;
 }
 .buff-blue { background: rgba(96, 165, 250, 0.15); color: #60a5fa; }
+.buff-pink { background: rgba(244, 114, 182, 0.15); color: #f472b6; }
+.buff-green { background: rgba(52, 211, 153, 0.15); color: #34d399; }
 
-/* ===== 灵根体质标签 ===== */
+/* ===== 天命标签 ===== */
 .talent-row {
 	display: flex;
 	gap: 0.5rem;
@@ -956,9 +1243,17 @@ function closeModal() {
 	border-radius: 999px;
 	border: 1px solid;
 }
+.root-tag {
+	border-color: rgba(96, 165, 250, 0.4);
+	color: #60a5fa;
+}
 .thunder-tag {
 	border-color: rgba(250, 204, 21, 0.4);
 	color: #facc15;
+}
+.battle-tag {
+	border-color: rgba(239, 68, 68, 0.4);
+	color: #ef4444;
 }
 
 .realm-desc {
@@ -1071,6 +1366,7 @@ function closeModal() {
 	background: linear-gradient(90deg, #7c3aed, #6366f1);
 	padding: 0.8rem;
 }
+.thunder-actions .breakthrough-btn { width: auto; margin-top: 0; }
 .thunder-hint {
 	font-size: 0.78rem;
 	color: #fbbf24;
@@ -1110,6 +1406,7 @@ function closeModal() {
 	align-items: baseline;
 	gap: 0.75rem;
 	margin-bottom: 1rem;
+	flex-wrap: wrap;
 }
 .pill-title { font-size: 1.1rem; font-weight: 700; margin: 0; }
 .pill-subtitle { font-size: 0.78rem; color: var(--content-meta, #9ca3af); }
@@ -1126,6 +1423,7 @@ function closeModal() {
 	border-radius: 0.6rem;
 	background: rgba(128, 128, 128, 0.06);
 }
+.pill-item.pill-locked { opacity: 0.55; }
 .pill-orb {
 	width: 2rem;
 	height: 2rem;
@@ -1287,8 +1585,23 @@ function closeModal() {
 	flex-wrap: wrap;
 }
 
-/* ===== 心魔劫弹窗 ===== */
+/* ===== 心魔劫 / 妖兽 / 坊市弹窗 ===== */
 .demon-modal { border-color: rgba(248, 113, 113, 0.4); }
+.beast-modal { border-color: rgba(239, 68, 68, 0.45); }
+.beast-title {
+	font-size: 1.3rem;
+	font-weight: 800;
+	color: #ef4444;
+	margin: 0 0 0.5rem;
+}
+.market-modal { border-color: rgba(251, 191, 36, 0.45); }
+.market-title {
+	font-size: 1.3rem;
+	font-weight: 800;
+	color: #fbbf24;
+	margin: 0 0 0.5rem;
+}
+.market-price { color: #fbbf24; }
 .demon-title {
 	font-size: 1.3rem;
 	font-weight: 800;
@@ -1301,7 +1614,7 @@ function closeModal() {
 	margin-bottom: 1.25rem;
 }
 
-/* ===== 创角 ===== */
+/* ===== 创角三转盘 ===== */
 .creation-card { text-align: center; }
 .creation-title {
 	font-size: 1.6rem;
@@ -1311,49 +1624,19 @@ function closeModal() {
 .creation-desc {
 	font-size: 0.9rem;
 	color: var(--content-meta, #9ca3af);
-	margin-bottom: 1.5rem;
+	margin-bottom: 0.5rem;
 }
 .creation-step {
 	font-size: 1rem;
 	font-weight: 700;
-	margin: 1.25rem 0 0.75rem;
+	margin: 1.5rem 0 0.75rem;
 	text-align: left;
 }
-.root-grid {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
-	gap: 0.6rem;
-}
-.root-item {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	gap: 0.35rem;
-	padding: 0.9rem 0.6rem;
-	border-radius: 0.75rem;
-	border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.2));
-	background: rgba(128, 128, 128, 0.05);
-	cursor: pointer;
-	transition: all 0.2s;
-}
-.root-item:hover { border-color: var(--primary, #6366f1); }
-.root-item.selected {
-	border-color: var(--primary, #6366f1);
-	background: rgba(99, 102, 241, 0.1);
-	box-shadow: 0 0 12px rgba(99, 102, 241, 0.25);
-}
-.root-orb { width: 1.75rem; height: 1.75rem; border-radius: 50%; }
-.root-name { font-weight: 700; font-size: 0.9rem; }
-.root-desc {
-	font-size: 0.72rem;
-	color: var(--content-meta, #9ca3af);
-	line-height: 1.4;
-}
-
 .wheel-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
 	gap: 0.6rem;
+	margin-bottom: 0.75rem;
 }
 .wheel-item {
 	display: flex;
@@ -1394,7 +1677,7 @@ function closeModal() {
 .spin-btn {
 	background: linear-gradient(90deg, #f59e0b, #fbbf24);
 	color: #1c1917;
-	padding: 0.7rem 2rem;
+	padding: 0.6rem 1.8rem;
 }
 .creation-result {
 	font-size: 0.95rem;
