@@ -16,11 +16,11 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 	// 主页
 	links.push(LinkPresets.Home);
 
-	// 文章及其子菜单
+	// 学习
 	links.push({
-		name: "文章",
+		name: "学习",
 		url: "#",
-		icon: "material-symbols:article",
+		icon: "material-symbols:book",
 		children: [
 			// 归档
 			LinkPresets.Archive,
@@ -36,7 +36,49 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 		],
 	});
 
-	//社交及其子菜单
+	// 项目
+	links.push({
+		name: "项目",
+		url: "#",
+		icon: "material-symbols:rocket-launch",
+		children: [
+			// 项目展示
+			LinkPresets.Projects,
+
+			// 源码解析（指向归档页的源码解析分类筛选）
+			{
+				name: "源码解析",
+				url: "/archive/?category=%E6%BA%90%E7%A0%81%E8%A7%A3%E6%9E%90",
+				icon: "material-symbols:code",
+			},
+		],
+	});
+
+	// 修仙（娱乐）
+	links.push({
+		name: "修仙",
+		url: "#",
+		icon: "material-symbols:gamepad",
+		children: [
+			{
+				name: "修炼面板",
+				url: "/xiuxian/",
+				icon: "material-symbols:stars",
+			},
+			{
+				name: "修炼日志",
+				url: "/xiuxian/log",
+				icon: "material-symbols:history",
+			},
+			{
+				name: "境界图谱",
+				url: "/xiuxian/map",
+				icon: "material-symbols:map",
+			},
+		],
+	});
+
+	// 社交
 	links.push({
 		name: "社交",
 		url: "#",
@@ -47,79 +89,30 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 
 			// 留言
 			LinkPresets.Guestbook,
-		],
-	});
 
-	// 我的及其子菜单
-	links.push({
-		name: "我的",
-		url: "#",
-		icon: "material-symbols:person",
-		children: [
 			// 动态
 			LinkPresets.Dynamic,
-
-			// 项目
-			LinkPresets.Projects,
-
-			// 相册
-			LinkPresets.Gallery,
-
-			// 书签导航
-			LinkPresets.Booknav,
-
-			// 哔哩哔哩追番
-			LinkPresets.Bilibili,
-
-			// 番组计划
-			LinkPresets.Bangumi,
-
-			// VNDB
-			LinkPresets.VNDB,
-
-			// MyAnimeList
-			LinkPresets.MAL,
 		],
 	});
 
-	// 关于及其子菜单
+	// 关于
 	links.push({
 		name: "关于",
 		url: "#",
 		icon: "material-symbols:info",
 		children: [
+			// 关于页面
+			LinkPresets.About,
+
 			// 打赏
 			LinkPresets.Sponsor,
 
-			// 关于页面
-			LinkPresets.About,
-		],
-	});
-
-	// 自定义导航栏链接
-	links.push({
-		name: "链接",
-		url: "#",
-		icon: "material-symbols:link",
-		// 子菜单
-		children: [
+			// GitHub
 			{
 				name: "GitHub",
-				url: "https://github.com/CuteLeaf/Firefly",
+				url: "https://github.com/Melusine-ichnose",
 				external: true,
 				icon: "fa7-brands:github",
-			},
-			{
-				name: "Gitee",
-				url: "https://gitee.com/CuteLeaf/Firefly",
-				external: true,
-				icon: "fa7-brands:gitee",
-			},
-			{
-				name: "Firefly文档",
-				url: "https://docs-firefly.cuteleaf.cn",
-				external: true,
-				icon: "material-symbols:docs",
 			},
 		],
 	});

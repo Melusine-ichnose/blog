@@ -1,27 +1,40 @@
 # 关于我 / About Me
 
-你好！我是 **夏叶** ，一个在数字世界中默默无闻的一片叶子。
+你好！欢迎来到 **Melusine Blog**。
 
-## 🛠️ 关于本站
+我是 **Melusine**，一名软件开发工程师，主要方向是 **Java 后端开发** 与 **AI Agent 应用开发**。这个博客用来记录我在项目实战和源码学习中的思考与沉淀。
 
-这个网站使用 **Astro** 框架构建，采用了 [Firefly](https://github.com/CuteLeaf/Firefly) 模板，Firefly 是基于 [Fuwari](https://github.com/saicaca/fuwari) 的二次开发。
+## 这个博客写什么
 
-**Firefly** 是一款基于 Astro 框架和 Fuwari 模板开发的清新美观且现代化个人博客主题模板，专为技术爱好者和内容创作者设计。该主题融合了现代 Web 技术栈，提供了丰富的功能模块和高度可定制的界面，让您能够轻松打造出专业且美观的个人博客网站。
+**项目复盘**
 
+记录开源项目的设计思路、技术选型与踩坑过程。你可以在[项目页](/projects/)看到这些项目：
 
-**🖥️在线预览： [Firefly - Demo site](https://firefly.cuteleaf.cn/)**
+- **TaskWeaver**：基于 LangGraph 的生产级 AI Agent 服务
+- **bill-splitter**：单文件的合租账单分摊工具
+- **DeepStudy**：CNN 手写数字识别
+- **Seat Reservation System**：自习室座位预约系统
+- **Multi-merchant Mall System**：多商户商城系统
 
-**📝Firefly使用文档： [https://docs-firefly.cuteleaf.cn](https://docs-firefly.cuteleaf.cn/)**
+**源码笔记**
 
-**⭐Firefly开源地址：[https://github.com/CuteLeaf/Firefly](https://github.com/CuteLeaf/Firefly)** 
+阅读优秀开源项目的源码是提升最快的学习方式之一。我会在这里分享对自己项目和主流框架的源码解析，以及总结的源码阅读方法。
 
-**⭐Fuwari开源地址：[https://github.com/saicaca/fuwari](https://github.com/saicaca/fuwari)**
+- 如何从宏观架构入手，再深入核心模块
+- 如何跟踪一次请求/一次调用的完整链路
+- 如何把源码中的设计模式用到自己的项目里
 
-::github{repo="CuteLeaf/Firefly"}
+## 技术栈
 
-::github{repo="saicaca/fuwari"}
+- **后端**：Java、SpringBoot、MySQL、Redis、RabbitMQ、Netty
+- **AI 应用**：Python、LangChain / LangGraph、FastAPI、MCP 协议
+- **工具**：Git、Docker、Maven
+
+## 联系我
+
+- GitHub：[github.com/Melusine-ichnose](https://github.com/Melusine-ichnose)
+- Email：[tanyanbo113@163.com](mailto:tanyanbo113@163.com)
 
 ---
 
 *感谢你的来访！希望在这里能找到对你有用的内容！*
-
