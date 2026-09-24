@@ -104,9 +104,6 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 			// 关于页面
 			LinkPresets.About,
 
-			// 打赏
-			LinkPresets.Sponsor,
-
 			// GitHub
 			{
 				name: "GitHub",
