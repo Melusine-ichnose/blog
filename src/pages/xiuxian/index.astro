@@ -6,10 +6,10 @@ import elixirImg from "@/assets/images/yanami/xiuxian-elixir.png";
 import "@/styles/pages/common.css";
 ---
 
-<MainGridLayout wide title="修仙修炼" description="闭关修炼，突破境界，成就大道">
+<MainGridLayout title="修仙修炼" description="闭关修炼，突破境界，成就大道">
   <div class="flex w-full flex-col rounded-(--radius-large) overflow-hidden relative min-h-32">
-    <!-- 水墨仙侠横幅背景：容器严格采用原图 1260×724 比例，object-cover 等于零裁切，全图完整露出 -->
-    <div class="relative w-full aspect-[1260/724] shrink-0">
+    <!-- 水墨仙侠横幅背景 -->
+    <div class="relative h-28 md:h-40 shrink-0">
       <img src={xiuxianBg.src} alt="水墨仙侠" class="w-full h-full object-cover" loading="eager" />
       <div class="absolute inset-0 bg-gradient-to-t from-black/55 via-black/15 to-transparent"></div>
       <div class="absolute bottom-3 inset-x-9">

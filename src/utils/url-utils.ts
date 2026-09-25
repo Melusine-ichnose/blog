@@ -112,13 +112,3 @@ const CONTENT_DETAIL_PATH_PATTERNS = [
 export function isArticleDetailPage(pathname: string): boolean {
 	return CONTENT_DETAIL_PATH_PATTERNS.some((re) => re.test(pathname));
 }
-
-/**
- * 通栏沉浸式页面路径：这些页面不渲染任何侧栏列，内容占满整行
- * （如修仙小游戏等独立应用页）。SSR 与客户端 swup 软导航共用此判定。
- */
-const WIDE_LAYOUT_PATH_PATTERNS = [/^\/xiuxian(?:\/|$)/];
-
-export function isWideLayoutPage(pathname: string): boolean {
-	return WIDE_LAYOUT_PATH_PATTERNS.some((re) => re.test(pathname));
-}
