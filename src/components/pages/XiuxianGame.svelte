@@ -1497,13 +1497,13 @@ function closeModal() {
 </div>
 
 <style>
-.xiuxian-game { display: flex; flex-direction: column; gap: 1.5rem; }
+.xiuxian-game { display: flex; flex-direction: column; gap: 1.1rem; }
 
 .realm-card, .pill-card, .log-card, .arena-card {
 	background: var(--card-bg, rgba(255, 255, 255, 0.03));
 	border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.15));
 	border-radius: 1rem;
-	padding: 1.5rem;
+	padding: 1.15rem 1.25rem;
 }
 
 .realm-header { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
@@ -1524,7 +1524,7 @@ function closeModal() {
 .thunder-tag { border-color: rgba(250, 204, 21, 0.4); color: #facc15; }
 .battle-tag { border-color: rgba(239, 68, 68, 0.4); color: #ef4444; }
 
-.realm-desc { color: var(--content-meta, #9ca3af); margin: 0.75rem 0 1.25rem; font-size: 0.9rem; }
+.realm-desc { color: var(--content-meta, #9ca3af); margin: 0.5rem 0 1rem; font-size: 0.9rem; }
 
 /* ===== 修为条 ===== */
 .xp-bar { height: 0.75rem; background: rgba(128, 128, 128, 0.15); border-radius: 999px; overflow: hidden; }
@@ -1536,15 +1536,22 @@ function closeModal() {
 @keyframes xpGlow { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.35); } }
 .xp-text { display: flex; gap: 0.35rem; font-size: 0.85rem; color: var(--content-meta, #9ca3af); margin-top: 0.4rem; }
 
-/* ===== 战力面板 ===== */
+/* ===== 战力面板（宽屏气血条与攻防横向并排，压缩纵向高度）===== */
 .power-panel {
-	margin-top: 1.25rem;
-	padding: 1rem 1.25rem;
+	margin-top: 1rem;
+	padding: 0.85rem 1rem;
 	border-radius: 0.75rem;
 	background: rgba(128, 128, 128, 0.06);
 	border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.12));
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: 0.75rem;
 }
-.hp-block { margin-bottom: 0.85rem; }
+@media (min-width: 640px) {
+	.power-panel { grid-template-columns: 1.15fr 1.5fr; align-items: center; gap: 1.25rem; }
+	.hp-block { margin-bottom: 0; }
+}
+.hp-block { margin-bottom: 0; }
 .stat-label {
 	display: flex; justify-content: space-between;
 	font-size: 0.8rem; font-weight: 600; margin-bottom: 0.35rem;
@@ -1557,10 +1564,10 @@ function closeModal() {
 	transition: width 0.4s ease;
 }
 .hp-fill.hp-low-fill { background: linear-gradient(90deg, #dc2626, #f87171); }
-.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem; }
+.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
 .stat-cell {
-	display: flex; flex-direction: column; align-items: center; gap: 0.15rem;
-	padding: 0.5rem; border-radius: 0.6rem; background: rgba(128, 128, 128, 0.08);
+	display: flex; flex-direction: column; align-items: center; gap: 0.1rem;
+	padding: 0.4rem; border-radius: 0.6rem; background: rgba(128, 128, 128, 0.08);
 }
 .stat-num { font-size: 1.2rem; font-weight: 800; color: var(--primary, #818cf8); }
 .stat-power .stat-num { color: #fbbf24; }
@@ -1568,8 +1575,8 @@ function closeModal() {
 
 /* ===== 打坐 ===== */
 .meditation-panel {
-	display: flex; align-items: center; gap: 1.25rem;
-	margin-top: 1.25rem; padding: 1rem 1.25rem;
+	display: flex; align-items: center; gap: 1rem;
+	margin-top: 1rem; padding: 0.8rem 1rem;
 	border-radius: 0.75rem; border: 1px dashed var(--line-divider, rgba(128, 128, 128, 0.25));
 	transition: border-color 0.3s;
 }
@@ -1613,7 +1620,7 @@ function closeModal() {
 
 .stats {
 	display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;
-	font-size: 0.78rem; color: var(--content-meta, #9ca3af); margin-top: 1rem;
+	font-size: 0.78rem; color: var(--content-meta, #9ca3af); margin-top: 0.75rem;
 }
 .reset-btn {
 	margin-left: auto; font-size: 0.75rem; color: #f87171;
@@ -1621,11 +1628,14 @@ function closeModal() {
 }
 .reset-btn:hover { opacity: 1; text-decoration: underline; }
 
-/* ===== 斗法台 ===== */
-.arena-list { display: flex; flex-direction: column; gap: 0.75rem; }
+/* ===== 斗法台（宽屏两列排列，缩短纵向长度）===== */
+.arena-list { display: grid; grid-template-columns: 1fr; gap: 0.6rem; }
+@media (min-width: 640px) {
+	.arena-list { grid-template-columns: 1fr 1fr; }
+}
 .arena-item {
-	display: flex; align-items: center; gap: 0.85rem;
-	padding: 0.75rem 0.9rem; border-radius: 0.75rem;
+	display: flex; align-items: center; gap: 0.7rem;
+	padding: 0.6rem 0.75rem; border-radius: 0.75rem;
 	background: rgba(128, 128, 128, 0.06);
 	border: 1px solid transparent;
 }
@@ -1643,13 +1653,13 @@ function closeModal() {
 }
 
 /* ===== 丹药 ===== */
-.pill-header { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.pill-header { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
 .pill-title { font-size: 1.1rem; font-weight: 700; margin: 0; }
 .pill-subtitle { font-size: 0.78rem; color: var(--content-meta, #9ca3af); }
-.pill-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.pill-list { display: flex; flex-direction: column; gap: 0.55rem; }
 .pill-item {
-	display: flex; align-items: center; gap: 0.85rem;
-	padding: 0.6rem 0.75rem; border-radius: 0.6rem; background: rgba(128, 128, 128, 0.06);
+	display: flex; align-items: center; gap: 0.75rem;
+	padding: 0.5rem 0.7rem; border-radius: 0.6rem; background: rgba(128, 128, 128, 0.06);
 }
 .pill-item.pill-locked { opacity: 0.55; }
 .pill-orb { width: 2rem; height: 2rem; border-radius: 50%; flex-shrink: 0; }
@@ -1662,8 +1672,8 @@ function closeModal() {
 .pill-buy { background: rgba(128, 128, 128, 0.2); color: inherit; }
 
 /* ===== 日志 ===== */
-.log-title { font-size: 1.1rem; font-weight: 700; margin: 0 0 0.75rem; }
-.log-list { display: flex; flex-direction: column; gap: 0.35rem; max-height: 16rem; overflow-y: auto; }
+.log-title { font-size: 1.1rem; font-weight: 700; margin: 0 0 0.6rem; }
+.log-list { display: flex; flex-direction: column; gap: 0.3rem; max-height: 11rem; overflow-y: auto; }
 .log-empty { font-size: 0.85rem; color: var(--content-meta, #9ca3af); }
 .log-entry { display: flex; gap: 0.6rem; font-size: 0.8rem; line-height: 1.45; }
 .log-time { color: var(--content-meta, #9ca3af); flex-shrink: 0; font-size: 0.72rem; padding-top: 0.1rem; }

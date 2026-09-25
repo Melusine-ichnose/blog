@@ -9,47 +9,54 @@ import "@/styles/pages/common.css";
 <MainGridLayout title="修仙修炼" description="闭关修炼，突破境界，成就大道">
   <div class="flex w-full flex-col rounded-(--radius-large) overflow-hidden relative min-h-32">
     <!-- 水墨仙侠横幅背景 -->
-    <div class="relative h-44 md:h-60 shrink-0">
+    <div class="relative h-28 md:h-40 shrink-0">
       <img src={xiuxianBg.src} alt="水墨仙侠" class="w-full h-full object-cover" loading="eager" />
       <div class="absolute inset-0 bg-gradient-to-t from-black/55 via-black/15 to-transparent"></div>
-      <div class="absolute bottom-4 inset-x-9">
-        <h2 class="text-2xl md:text-3xl font-bold text-white drop-shadow-lg">修仙修炼</h2>
-        <p class="text-sm text-white/85 drop-shadow">持续打坐吐纳 · 炼丹服丹 · 斗法破境</p>
+      <div class="absolute bottom-3 inset-x-9">
+        <h2 class="text-xl md:text-2xl font-bold text-white drop-shadow-lg">修仙修炼</h2>
+        <p class="text-xs md:text-sm text-white/85 drop-shadow">持续打坐吐纳 · 炼丹服丹 · 斗法破境</p>
       </div>
     </div>
 
     <div class="card-base z-10 px-9 py-6 relative w-full">
       <XiuxianGame client:load />
 
-      <div class="mt-8 pt-6 border-t border-dashed border-(--line-divider)">
-        <div class="grid md:grid-cols-[1fr_auto] gap-6 items-start">
-          <div>
-            <h3 class="text-lg font-semibold mb-3">修炼体系</h3>
-            <div class="grid gap-2 text-sm text-(--content-meta)">
-              <div class="flex justify-between"><span>炼气期</span><span>100 修为</span></div>
-              <div class="flex justify-between"><span>筑基期</span><span>300 修为</span></div>
-              <div class="flex justify-between"><span>金丹期</span><span>800 修为</span></div>
-              <div class="flex justify-between"><span>元婴期</span><span>2000 修为</span></div>
-              <div class="flex justify-between"><span>化神期</span><span>5000 修为</span></div>
-              <div class="flex justify-between"><span>合体期</span><span>12000 修为</span></div>
-              <div class="flex justify-between"><span>渡劫期</span><span>30000 修为</span></div>
-              <div class="flex justify-between"><span>大乘期</span><span>80000 修为</span></div>
-              <div class="flex justify-between"><span>飞升境</span><span>圆满</span></div>
+      <!-- 玩法细则默认折叠：境界修为要求在游戏内突破按钮处均有实时提示 -->
+      <details class="mt-5 group">
+        <summary class="cursor-pointer text-sm font-semibold text-(--content-meta) select-none list-none flex items-center gap-1.5 [&::-webkit-details-marker]:hidden">
+          <span class="transition-transform group-open:rotate-90 inline-block">▸</span>
+          修炼体系与玩法细则
+        </summary>
+        <div class="pt-5 mt-4 border-t border-dashed border-(--line-divider)">
+          <div class="grid md:grid-cols-[1fr_auto] gap-6 items-start">
+            <div>
+              <h3 class="text-base font-semibold mb-3">修炼体系</h3>
+              <div class="grid grid-cols-2 gap-x-8 gap-y-1.5 text-sm text-(--content-meta)">
+                <div class="flex justify-between"><span>炼气期</span><span>100 修为</span></div>
+                <div class="flex justify-between"><span>筑基期</span><span>300 修为</span></div>
+                <div class="flex justify-between"><span>金丹期</span><span>800 修为</span></div>
+                <div class="flex justify-between"><span>元婴期</span><span>2000 修为</span></div>
+                <div class="flex justify-between"><span>化神期</span><span>5000 修为</span></div>
+                <div class="flex justify-between"><span>合体期</span><span>12000 修为</span></div>
+                <div class="flex justify-between"><span>渡劫期</span><span>30000 修为</span></div>
+                <div class="flex justify-between"><span>大乘期</span><span>80000 修为</span></div>
+                <div class="flex justify-between"><span>飞升境</span><span>圆满</span></div>
+              </div>
+            </div>
+            <!-- 丹药配图 -->
+            <div class="w-32 md:w-44 shrink-0 rounded-xl overflow-hidden border border-(--line-divider)">
+              <img src={elixirImg.src} alt="丹药" class="w-full h-auto" loading="lazy" />
+              <p class="text-xs text-(--content-meta) text-center py-2">机缘所至 · 丹药助道</p>
             </div>
           </div>
-          <!-- 丹药配图 -->
-          <div class="w-40 md:w-52 shrink-0 rounded-xl overflow-hidden border border-(--line-divider)">
-            <img src={elixirImg.src} alt="丹药" class="w-full h-auto" loading="lazy" />
-            <p class="text-xs text-(--content-meta) text-center py-2">机缘所至 · 丹药助道</p>
-          </div>
+          <p class="text-xs text-(--content-meta) mt-4 opacity-75">
+            创角三转盘定天命：资质（甲乙丙丁）、灵根（天灵根到伪灵根）、体质（凡体到至尊仙胎体）。
+            气血、攻击、防御与战力随境界与丹药成长；打坐时机缘天灾自动结算、绝不中断修炼，每息还可持续疗伤。
+            炼丹并非必成，品阶越高失败率越高；回春丹回血、淬体丹壮大气血、增元丹助长攻击，皆可在斗法台派上用场——
+            六名对手按战力排开，势强势弱一目了然，战胜有奖、力竭有罚；金丹期起突破更需硬渡三道天雷。
+          </p>
         </div>
-        <p class="text-xs text-(--content-meta) mt-4 opacity-75">
-          创角三转盘定天命：资质（甲乙丙丁）、灵根（天灵根到伪灵根）、体质（凡体到至尊仙胎体）。
-          气血、攻击、防御与战力随境界与丹药成长；打坐时机缘天灾自动结算、绝不中断修炼，每息还可持续疗伤。
-          炼丹并非必成，品阶越高失败率越高；回春丹回血、淬体丹壮大气血、增元丹助长攻击，皆可在斗法台派上用场——
-          六名对手按战力排开，势强势弱一目了然，战胜有奖、力竭有罚；金丹期起突破更需硬渡三道天雷。
-        </p>
-      </div>
+      </details>
     </div>
   </div>
 </MainGridLayout>
