@@ -61,14 +61,14 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 		icon: "material-symbols:travel-explore",
 	});
 
-	// 修仙（娱乐）
+	// 娱乐（修仙 + 小游戏）
 	links.push({
-		name: "修仙",
+		name: "娱乐",
 		url: "#",
 		icon: "material-symbols:gamepad",
 		children: [
 			{
-				name: "修炼面板",
+				name: "修仙面板",
 				url: "/xiuxian/",
 				icon: "material-symbols:stars",
 			},
@@ -81,6 +81,11 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 				name: "境界图谱",
 				url: "/xiuxian/map",
 				icon: "material-symbols:map",
+			},
+			{
+				name: "贪吃蛇",
+				url: "/snake/",
+				icon: "material-symbols:score",
 			},
 		],
 	});
