@@ -5,8 +5,9 @@
 import {
 	computeGridColumns,
 	gridColumnVarsToStyle,
+	WIDE_GRID_COLUMN_VARS,
 } from "@/utils/responsive-utils";
-import { isArticleDetailPage } from "@/utils/url-utils";
+import { isArticleDetailPage, isWideLayoutPage } from "@/utils/url-utils";
 
 const sidebarStickyState: Record<
 	"left" | "right",
@@ -33,7 +34,24 @@ export function updateMainGridCols(): void {
 	const varHost = document.getElementById("content-panel-inner");
 	if (!mainGrid || !varHost) return;
 
-	const isPostPage = isCurrentPagePost();
+	// 通栏沉浸式页（如 /xiuxian/）：swup 软导航后强制单列铺满。
+	// #main-grid 不随 swup 替换，所以必须按当前 pathname 同步 data 属性与 body 类。
+	const pathname = window.location.pathname;
+	const isWide = isWideLayoutPage(pathname);
+	mainGrid.setAttribute("data-page-wide", isWide ? "true" : "false");
+	document.body.classList.toggle("is-wide-layout", isWide);
+	if (isWide) {
+		const serialized = gridColumnVarsToStyle(WIDE_GRID_COLUMN_VARS);
+		if (serialized !== lastAppliedGeometry) {
+			lastAppliedGeometry = serialized;
+			for (const [key, value] of Object.entries(WIDE_GRID_COLUMN_VARS)) {
+				varHost.style.setProperty(key, String(value));
+			}
+		}
+		return;
+	}
+
+	const isPostPage = isArticleDetailPage(pathname);
 	// 缺省视为 true（fail-open）：属性缺失时不要误把整列折叠掉
 	const flag = (name: string): boolean =>
 		mainGrid.getAttribute(name) !== "false";

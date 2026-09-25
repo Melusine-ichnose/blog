@@ -36,7 +36,7 @@ import { isHomePage } from "@/utils/layout-utils";
 import { getAuthorAvatarUrl, getSiteLogo } from "@/utils/schema-image";
 import { buildSiteGraph, toAbsoluteUrl } from "@/utils/schema-utils";
 import { getOgLocale } from "@/utils/site-config-utils";
-import { getCanonicalUrl, url } from "@/utils/url-utils";
+import { getCanonicalUrl, isWideLayoutPage, url } from "@/utils/url-utils";
 
 import "@/styles/main.css";
 import "@/styles/immersive-reading.css";
@@ -73,6 +73,7 @@ let {
 // Swup can update the body for each page visit, but it's after the page transition, causing a delay for banner height change
 // so use Swup hooks instead to change the height immediately when a link is clicked
 const isHomePageCheck = isHomePage(Astro.url.pathname);
+const isWideLayout = isWideLayoutPage(Astro.url.pathname);
 
 // defines global css variables
 // why doing this in Layout instead of GlobalStyles: https://github.com/withastro/astro/issues/6728#issuecomment-1502203757
@@ -512,6 +513,7 @@ const ogImageAlt = propsOgImageAlt ?? pageTitle;
     class:list={[
       {
         "is-home": isHomePageCheck,
+        "is-wide-layout": isWideLayout,
         "sticky-navbar": navbarMode === "fixed",
         "dynamic-navbar": navbarMode === "dynamic",
       },

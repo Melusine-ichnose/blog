@@ -124,6 +124,22 @@ function trackSegments(left: boolean, right: boolean): string {
 }
 
 /**
+ * 通栏沉浸式页（如 /xiuxian/）的列几何：始终单列铺满、侧栏列全隐藏、内容不收窄。
+ * SSR（MainGridLayout）与客户端（updateMainGridCols）必须共用此常量。
+ */
+export const WIDE_GRID_COLUMN_VARS: GridColumnVars = {
+	"--cols-md": "1fr",
+	"--cols-xl": "1fr",
+	"--left-display-md": "none",
+	"--left-display-xl": "none",
+	"--right-display-md": "none",
+	"--right-display-xl": "none",
+	"--grid-sidebar-width": "300px",
+	"--content-ratio-md": 1,
+	"--content-ratio-xl": 1,
+};
+
+/**
  * 计算 #main-grid 的列几何（SSR 与客户端共用的唯一真源）。
  * 侧栏包裹层是 display:contents，真正的 grid item 是内层元素，按 DOM 顺序自动放置即可。
  */

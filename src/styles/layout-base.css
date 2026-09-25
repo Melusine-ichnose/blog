@@ -251,3 +251,9 @@
     opacity 0.35s ease-in-out,
     transform 0.35s ease-in-out;
 }
+
+/* 通栏沉浸式页面（如 /xiuxian/）：<768px 时侧栏组件改挂在 #mobile-bottom-sidebar，
+   该页同样隐藏；桌面端左右侧栏列由 --*-display-* 几何变量置 none，无需在此处理 */
+body.is-wide-layout #mobile-bottom-sidebar {
+  display: none !important;
+}
