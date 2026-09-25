@@ -1,14 +1,14 @@
 ---
 import Layout from "@/layouts/Layout.astro";
-import GalaxyCanvas from "@components/pages/GalaxyCanvas.svelte";
+import GalaxyScene from "@components/pages/GalaxyScene.svelte";
 ---
 
 <Layout
-  title="数字星河"
-  description="以代码为轨，穿梭数字星河 —— 一场 Canvas 粒子与行星轨道的沉浸航行"
+  title="星际轨道"
+  description="Three.js 模拟螺旋星系 —— 拖拽旋转视角，滚轮缩放，穿梭数字星河"
 >
   <div class="galaxy-page">
-    <GalaxyCanvas client:load />
+    <GalaxyScene client:only="svelte" />
 
     <!-- 左侧 Python 代码装饰层：还原"代码为轨"的视频氛围，随动画缓慢上滚 -->
     <div class="code-panel" aria-hidden="true">
@@ -77,7 +77,7 @@ while True:
           进入星河
           <span class="enter-arrow">→</span>
         </button>
-        <p class="intro-hint">移动鼠标操控航向 · 点击任意处激起星尘爆发</p>
+        <p class="intro-hint">拖拽旋转视角 · 滚轮缩放 · 右键平移</p>
       </div>
     </div>
   </div>
@@ -101,8 +101,6 @@ while True:
   if (btn && intro) {
     btn.addEventListener("click", () => {
       intro.classList.add("is-leaving");
-      // 通知 Canvas 引擎进入曲速冲刺
-      window.dispatchEvent(new CustomEvent("galaxy:warp"));
       // 过渡结束后彻底关闭遮罩，让出指针事件
       setTimeout(() => intro.remove(), 1200);
     });

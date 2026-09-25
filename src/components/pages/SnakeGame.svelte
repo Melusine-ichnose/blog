@@ -382,7 +382,8 @@
 	.board-wrap {
 		position: relative;
 		width: 100%;
-		max-width: 30rem;
+		/* 宽度随视口高度收缩，保证整屏免滚轮可见 */
+		max-width: min(30rem, calc(100vh - 16rem));
 	}
 	.board {
 		display: block;

@@ -1,0 +1,14 @@
+---
+import Layout from "@/layouts/MainGridLayout.astro";
+import TetrisGame from "@components/pages/TetrisGame.svelte";
+---
+
+<Layout title="俄罗斯方块" description="经典俄罗斯方块 - 消行升级加速，挑战最高分">
+  <div class="card-base px-4 py-4 md:px-6 md:py-5 rounded-(--card-radius)">
+    <div class="flex items-baseline gap-3 mb-3 flex-wrap">
+      <h1 class="text-xl font-bold text-90 m-0">俄罗斯方块</h1>
+      <p class="text-xs text-50 m-0">←→ 移动 · ↑ 旋转 · ↓ 软降 · 空格硬降 · P 暂停</p>
+    </div>
+    <TetrisGame client:load />
+  </div>
+</Layout>

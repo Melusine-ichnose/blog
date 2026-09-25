@@ -87,6 +87,16 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 				url: "/snake/",
 				icon: "material-symbols:score",
 			},
+			{
+				name: "俄罗斯方块",
+				url: "/tetris/",
+				icon: "material-symbols:grid-view",
+			},
+			{
+				name: "扫雷",
+				url: "/minesweeper/",
+				icon: "material-symbols:flag",
+			},
 		],
 	});
 

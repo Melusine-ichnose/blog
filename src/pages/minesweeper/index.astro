@@ -1,0 +1,14 @@
+---
+import Layout from "@/layouts/MainGridLayout.astro";
+import MinesweeperGame from "@components/pages/MinesweeperGame.svelte";
+---
+
+<Layout title="扫雷" description="经典扫雷 - 左键揭开，右键插旗，排清所有雷">
+  <div class="card-base px-4 py-4 md:px-6 md:py-5 rounded-(--card-radius)">
+    <div class="flex items-baseline gap-3 mb-3 flex-wrap">
+      <h1 class="text-xl font-bold text-90 m-0">扫雷</h1>
+      <p class="text-xs text-50 m-0">首击必安全 · 揭开所有非雷格即获胜</p>
+    </div>
+    <MinesweeperGame client:load />
+  </div>
+</Layout>

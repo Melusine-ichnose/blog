@@ -4,9 +4,11 @@ import SnakeGame from "@components/pages/SnakeGame.svelte";
 ---
 
 <Layout title="贪吃蛇" description="经典贪吃蛇小游戏 - 方向键控制，挑战最高分">
-  <div class="card-base p-6 md:p-8 rounded-(--card-radius)">
-    <h1 class="text-2xl font-bold mb-1 text-90">贪吃蛇</h1>
-    <p class="text-sm text-50 mb-5">吃到浆果变长加速，撞墙或咬到自己即结束。方向键 / WASD 控制，空格暂停，手机端滑动转向。</p>
+  <div class="card-base px-4 py-4 md:px-6 md:py-5 rounded-(--card-radius)">
+    <div class="flex items-baseline gap-3 mb-3 flex-wrap">
+      <h1 class="text-xl font-bold text-90 m-0">贪吃蛇</h1>
+      <p class="text-xs text-50 m-0">吃果变长加速，撞墙或咬到自己结束 · 方向键/WASD · 空格暂停</p>
+    </div>
     <SnakeGame client:load />
   </div>
 </Layout>
