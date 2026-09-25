@@ -4,7 +4,7 @@ import GalaxyScene from "@components/pages/GalaxyScene.svelte";
 ---
 
 <Layout
-  title="星际轨道"
+  title="银河漫游"
   description="Three.js 模拟螺旋星系 —— 拖拽旋转视角，滚轮缩放，穿梭数字星河"
 >
   <div class="galaxy-page">
@@ -84,6 +84,10 @@ while True:
 </Layout>
 
 <script>
+  // 本页无 #swup-container 结构：销毁 swup 实例，
+  // 让返回/前进退回浏览器原生整页导航，避免容器失配导致其他页面模块丢失
+  if (window.swup) window.swup.destroy();
+
   // 标题打字机：逐字打出代码风格标语（纯 JS，.astro 内联脚本不经 TS 编译）
   const PHRASE = "// CODE AS ORBIT · GALAXY.SHUTTLE";
   const tw = document.getElementById("galaxy-typewriter");

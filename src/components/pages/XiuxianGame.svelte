@@ -14,11 +14,14 @@ interface Realm {
 	requiredXp: number;
 	description: string;
 	thunderTrial: boolean;
+	/** 该境界寿元上限（年），突破时按差值一半补足当前寿元 */
+	lifespan: number;
 }
 
 type PillId =
 	| "juqi" | "huichun" | "ningshen" | "pojing"
-	| "quti" | "zengyuan" | "tianyuan" | "wudao" | "jiuzhuan";
+	| "quti" | "zengyuan" | "tianyuan" | "wudao" | "jiuzhuan"
+	| "shouyuan" | "souljade" | "timesand";
 
 interface Pill {
 	id: PillId;
@@ -27,6 +30,8 @@ interface Pill {
 	desc: string;
 	cost: number;
 	minRealm: number;
+	/** 仅坊市出售：炼丹坊不可炼制、随机掉落与战斗缴获不产出 */
+	shopOnly?: boolean;
 }
 
 interface Aptitude {
@@ -175,6 +180,14 @@ interface PlayerState {
 	towerFloor: number; // 无尽试炼塔已通关最高层
 	lastSeen: number; // 上次存档时间戳（离线闭关结算用）
 	log: LogEntry[];
+	// v9 黑暗轮回系统字段
+	lifespan: number; // 当前剩余寿元（年）
+	karma: number; // 业力（斗法/试炼胜者累积，影响天劫通过率）
+	karmaDebt: number; // 因果债（残魂玉/光阴碎片/逆术使用后累积，≥200 触发命运劫死亡）
+	memoryShards: number; // 记忆碎片（死亡结算产出，可在轮回商店兑换永久天赋）
+	rebirths: number; // 已轮回次数
+	talents: string[]; // 已解锁的轮回天赋 id
+	souljadeUsed: number; // 当前周目残魂玉已用次数（上限 3）
 }
 
 interface LogEntry {
@@ -191,15 +204,15 @@ interface EventResult {
 // ==================== 常量 ====================
 
 const REALMS: Realm[] = [
-	{ name: "炼气期", level: 1, requiredXp: 100, description: "初入修仙之门，吐纳天地灵气", thunderTrial: false },
-	{ name: "筑基期", level: 2, requiredXp: 300, description: "筑基成功，寿元增至两百载", thunderTrial: false },
-	{ name: "金丹期", level: 3, requiredXp: 800, description: "凝结金丹，可御剑飞行", thunderTrial: true },
-	{ name: "元婴期", level: 4, requiredXp: 2000, description: "元婴出窍，神识覆盖千里", thunderTrial: true },
-	{ name: "化神期", level: 5, requiredXp: 5000, description: "化神归一，可移山填海", thunderTrial: true },
-	{ name: "合体期", level: 6, requiredXp: 12000, description: "天人合一，万法归宗", thunderTrial: true },
-	{ name: "渡劫期", level: 7, requiredXp: 30000, description: "渡九九天劫，成就不灭之躯", thunderTrial: true },
-	{ name: "大乘期", level: 8, requiredXp: 80000, description: "大乘圆满，可破碎虚空", thunderTrial: true },
-	{ name: "飞升境", level: 9, requiredXp: Infinity, description: "飞升仙界，与天地同寿", thunderTrial: true },
+	{ name: "炼气期", level: 1, requiredXp: 100, description: "初入修仙之门，吐纳天地灵气", thunderTrial: false, lifespan: 100 },
+	{ name: "筑基期", level: 2, requiredXp: 300, description: "筑基成功，寿元增至两百载", thunderTrial: false, lifespan: 200 },
+	{ name: "金丹期", level: 3, requiredXp: 800, description: "凝结金丹，可御剑飞行", thunderTrial: true, lifespan: 400 },
+	{ name: "元婴期", level: 4, requiredXp: 2000, description: "元婴出窍，神识覆盖千里", thunderTrial: true, lifespan: 800 },
+	{ name: "化神期", level: 5, requiredXp: 5000, description: "化神归一，可移山填海", thunderTrial: true, lifespan: 1500 },
+	{ name: "合体期", level: 6, requiredXp: 12000, description: "天人合一，万法归宗", thunderTrial: true, lifespan: 2500 },
+	{ name: "渡劫期", level: 7, requiredXp: 30000, description: "渡九九天劫，成就不灭之躯", thunderTrial: true, lifespan: 4000 },
+	{ name: "大乘期", level: 8, requiredXp: 80000, description: "大乘圆满，可破碎虚空", thunderTrial: true, lifespan: 6000 },
+	{ name: "飞升境", level: 9, requiredXp: Infinity, description: "飞升仙界，与天地同寿", thunderTrial: true, lifespan: 10000 },
 ];
 
 /**
@@ -216,6 +229,10 @@ const PILLS: Pill[] = [
 	{ id: "tianyuan", name: "天元丹", color: "#fbbf24", desc: "服下 +2500 修为", cost: 1200, minRealm: 3 },
 	{ id: "wudao", name: "悟道丹", color: "#f472b6", desc: "60 息内机缘类事件概率 ×3", cost: 2500, minRealm: 4 },
 	{ id: "jiuzhuan", name: "九转金丹", color: "#e879f9", desc: "服下 +15000 修为", cost: 6000, minRealm: 5 },
+	// v9 黑暗轮回：寿元与因果道具
+	{ id: "shouyuan", name: "延寿丹", color: "#4ade80", desc: "服下寿元 +80 载（不逾上限）", cost: 800, minRealm: 1 },
+	{ id: "timesand", name: "光阴碎片", color: "#67e8f9", desc: "光阴回溯 · 气血回满；代价：因果债 +30", cost: 5000, minRealm: 0, shopOnly: true },
+	{ id: "souljade", name: "残魂因果玉", color: "#f0abfc", desc: "被动护身 · 濒死自动满血复活（每世限 3 次）；代价：因果债 +40", cost: 8000, minRealm: 0, shopOnly: true },
 ];
 
 /** 炼丹成功率：随丹药所需境界递减（97% → 67%） */
@@ -353,9 +370,41 @@ const EQUIP_POOL: { tid: string; name: string; slot: EquipSlot; rarity: EquipRar
 
 // ==================== 坊市 ====================
 
-/** 坊市出售的四种丹药（价格 = cost/10 取整到十位、最低 50 灵石） */
-const SHOP_PILL_IDS: PillId[] = ["juqi", "huichun", "ningshen", "pojing"];
+/** 坊市出售的丹药与因果道具（价格 = cost/10 取整到十位、最低 50 灵石） */
+const SHOP_PILL_IDS: PillId[] = ["juqi", "huichun", "ningshen", "pojing", "shouyuan", "timesand", "souljade"];
 const SHOP_PILLS: Pill[] = PILLS.filter((p) => SHOP_PILL_IDS.includes(p.id));
+/** 炼丹坊可炼的丹药（shopOnly 的因果道具不可炼制、不掉落） */
+const CRAFT_PILLS: Pill[] = PILLS.filter((p) => !p.shopOnly);
+
+// ==================== 轮回天赋 ====================
+
+/** 轮回天赋：死亡后以记忆碎片兑换的永久被动，跨周目生效 */
+interface RebirthTalent {
+	id: string;
+	name: string;
+	color: string;
+	desc: string;
+	cost: number; // 记忆碎片价格
+}
+
+const REBIRTH_TALENTS: RebirthTalent[] = [
+	{ id: "rich", name: "富甲一方", color: "#fbbf24", desc: "每世开局自带 500 灵石", cost: 30 },
+	{ id: "fast", name: "慧根天成", color: "#4ade80", desc: "打坐修为收益 +12%", cost: 50 },
+	{ id: "long", name: "长生道基", color: "#67e8f9", desc: "寿元上限 +20%", cost: 50 },
+	{ id: "body", name: "金刚道胎", color: "#f87171", desc: "气血上限 +150", cost: 40 },
+	{ id: "kwash", name: "善业加身", color: "#a78bfa", desc: "业力积累 -40%", cost: 40 },
+	{ id: "causal", name: "因果不沾", color: "#f0abfc", desc: "因果债积累 -30%", cost: 60 },
+];
+
+/** 死因：血战陨落 / 寿元耗尽 / 天劫陨落 / 因果崩溃 / 兵解转世 */
+type DeathCause = "battle" | "lifespan" | "thunder" | "debt" | "bingjie";
+const DEATH_TEXTS: Record<DeathCause, { title: string; desc: string }> = {
+	battle: { title: "血溅当场", desc: "你气血枯竭，倒在了斗法台上。一缕真灵飘入轮回。" },
+	lifespan: { title: "寿元耗尽", desc: "寿元归零，神魂枯萎。任你修为通天，亦敌不过岁月侵蚀。" },
+	thunder: { title: "天劫陨落", desc: "三道天雷尽数劈落，你道基尽毁，身死道消。" },
+	debt: { title: "因果崩溃", desc: "因果债过载，命运劫降临。天道收回了你透支的一切。" },
+	bingjie: { title: "兵解转世", desc: "你自行兵解，散去一身修为，真灵投入轮回。" },
+};
 
 const CULTIVATE_TEXTS = [
 	"你盘膝而坐，吐纳天地灵气...",
@@ -395,11 +444,12 @@ const ROOT_BASE = {
 const EMPTY_PILLS: Record<PillId, number> = {
 	juqi: 0, huichun: 0, ningshen: 0, pojing: 0, quti: 0,
 	zengyuan: 0, tianyuan: 0, wudao: 0, jiuzhuan: 0,
+	shouyuan: 0, souljade: 0, timesand: 0,
 };
 
 /** 全新角色初始状态（初次进入、兵解转世、导入兜底时共用） */
 function makeFreshPlayer(): PlayerState {
-	return {
+	const fresh: PlayerState = {
 		xp: 0,
 		realmIndex: 0,
 		hp: 100,
@@ -431,7 +481,18 @@ function makeFreshPlayer(): PlayerState {
 		towerFloor: 0,
 		lastSeen: Date.now(),
 		log: [],
+		// v9 黑暗轮回默认值
+		lifespan: REALMS[0].lifespan,
+		karma: 0,
+		karmaDebt: 0,
+		memoryShards: 0,
+		rebirths: 0,
+		talents: [],
+		souljadeUsed: 0,
 	};
+	// 轮回天赋「富甲一方」开局生效
+	if (fresh.talents.includes("rich")) fresh.stones += 500;
+	return fresh;
 }
 
 let player = $state<PlayerState>(makeFreshPlayer());
@@ -471,6 +532,12 @@ let enhanceMsg = $state("");
 
 // ---- 闭关归来结算弹窗 ----
 let offlineReport = $state<{ duration: string; xp: number; stones: number } | null>(null);
+
+// ---- v9 轮回结算 / 轮回商店弹窗 ----
+let showRebirthModal = $state(false);
+let deathCause = $state<DeathCause | null>(null);
+let rebirthReport = $state<{ shards: number; cause: DeathCause } | null>(null);
+let showRebirthShop = $state(false);
 
 // ==================== 属性计算 ====================
 
@@ -515,6 +582,19 @@ const coreManual = $derived(MANUALS.find((m) => m.id === player.equipped.core) ?
 const bodyManual = $derived(MANUALS.find((m) => m.id === player.equipped.body) ?? null);
 const attackManual = $derived(MANUALS.find((m) => m.id === player.equipped.attack) ?? null);
 
+const hasTalent = (id: string) => player.talents.includes(id);
+
+/** 寿元上限 = 境界基础 × 长生道基天赋加成 */
+const lifespanMax = $derived(
+	Math.round(currentRealm.lifespan * (hasTalent("long") ? 1.2 : 1)),
+);
+/** 寿元剩余比例（驱动状态条颜色与 debuff） */
+const lifespanRatio = $derived(lifespanMax > 0 ? Math.max(0, player.lifespan / lifespanMax) : 0);
+/** 暮年 debuff：寿元 <30% 修炼 ×0.85；<10% 残烛 ×0.65 */
+const ageMult = $derived(lifespanRatio < 0.1 ? 0.65 : lifespanRatio < 0.3 ? 0.85 : 1);
+/** 因果债 debuff：≥150 时修炼 ×0.85 */
+const debtMult = $derived(player.karmaDebt >= 150 ? 0.85 : 1);
+
 const successRate = $derived.by(() => {
 	if (!nextRealm) return 0;
 	const base = Math.max(0.3, 0.9 - nextRealm.level * 0.06);
@@ -524,7 +604,10 @@ const successRate = $derived.by(() => {
 		(currentPhysique?.breakBonus ?? 0) +
 		(coreManual?.breakBonus ?? 0) +
 		(player.pojingActive ? 0.25 : 0);
-	return Math.min(0.95, base + bonus);
+	// 业力反噬：karma ×0.1%（上限 15%）；高因果债额外 -8%
+	const karmaPenalty = Math.min(0.15, player.karma * 0.001);
+	const debtPenalty = player.karmaDebt >= 80 ? 0.08 : 0;
+	return Math.min(0.95, Math.max(0.05, base + bonus - karmaPenalty - debtPenalty));
 });
 
 const breathXp = $derived(
@@ -533,7 +616,10 @@ const breathXp = $derived(
 			(currentAptitude?.xpMult ?? 1) *
 			rootXpMult *
 			(currentPhysique?.xpMult ?? 1) *
-			(coreManual?.xpMult ?? 1),
+			(coreManual?.xpMult ?? 1) *
+			ageMult *
+			debtMult *
+			(hasTalent("fast") ? 1.12 : 1),
 	),
 );
 
@@ -544,8 +630,10 @@ const weaponBonus = $derived(player.equip.weapon ? equipValue(player.equip.weapo
 const armorBonus = $derived(player.equip.armor ? equipValue(player.equip.armor) : 0);
 const artifactBonus = $derived(player.equip.artifact ? equipValue(player.equip.artifact) : 0);
 
-/** 气血上限：境界 + 淬体丹 + 炼体功法 + 法宝槽 */
-const maxHp = $derived(100 + currentRealm.level * 60 + player.qutiUsed * 80 + (bodyManual?.hpBonus ?? 0) + artifactBonus);
+/** 气血上限：境界 + 淬体丹 + 炼体功法 + 法宝槽 + 轮回天赋「金刚道胎」 */
+const maxHp = $derived(
+	100 + currentRealm.level * 60 + player.qutiUsed * 80 + (bodyManual?.hpBonus ?? 0) + artifactBonus + (hasTalent("body") ? 150 : 0),
+);
 /** 攻击：境界 + 增元丹 + 武器 + 攻伐功法，再乘真武体加成 */
 const atk = $derived(
 	Math.round(
@@ -566,7 +654,14 @@ const eventChance = $derived(0.28 + (currentCombo?.allEventBonus ?? 0));
  * 避免雷劫/突破/斗法结算与后台事件互相干扰。
  */
 const meditationPaused = $derived(
-	showThunderModal || showBreakthroughModal || battle !== null || enhanceId !== null || offlineReport !== null,
+	showThunderModal ||
+		showBreakthroughModal ||
+		battle !== null ||
+		enhanceId !== null ||
+		offlineReport !== null ||
+		showRebirthModal ||
+		showRebirthShop ||
+		needCreation,
 );
 
 // ==================== 持久化 ====================
@@ -602,6 +697,14 @@ function load() {
 				bag: Array.isArray(data.bag) ? data.bag : [],
 				towerFloor: typeof data.towerFloor === "number" ? data.towerFloor : 0,
 				lastSeen: typeof data.lastSeen === "number" ? data.lastSeen : Date.now(),
+				// v9 旧档兜底：寿元默认当前境界上限
+				lifespan: typeof data.lifespan === "number" ? data.lifespan : REALMS[data.realmIndex ?? 0]?.lifespan ?? 100,
+				karma: typeof data.karma === "number" ? data.karma : 0,
+				karmaDebt: typeof data.karmaDebt === "number" ? data.karmaDebt : 0,
+				memoryShards: typeof data.memoryShards === "number" ? data.memoryShards : 0,
+				rebirths: typeof data.rebirths === "number" ? data.rebirths : 0,
+				talents: Array.isArray(data.talents) ? data.talents : [],
+				souljadeUsed: typeof data.souljadeUsed === "number" ? data.souljadeUsed : 0,
 			};
 			// 突破后可能出现气血超上限（理论不会），兜底修正
 			player.hp = Math.min(player.hp, maxHp);
@@ -650,7 +753,7 @@ function addLog(message: string, type: LogEntry["type"] = "info") {
 }
 
 function availablePills(): Pill[] {
-	return PILLS.filter((p) => p.minRealm <= player.realmIndex);
+	return PILLS.filter((p) => !p.shopOnly && p.minRealm <= player.realmIndex);
 }
 
 function grantRandomPill(): boolean {
@@ -669,6 +772,111 @@ function damageHp(amount: number) {
 /** 治疗气血（不超上限） */
 function healHp(amount: number) {
 	player.hp = Math.min(maxHp, player.hp + Math.round(amount));
+}
+
+// ==================== v9 业力 / 因果债 / 寿元 / 轮回 ====================
+
+/** 业力累积：斗法/试炼胜者沾染杀业，善业加身天赋可削减 */
+function addKarma(amount: number) {
+	player.karma += Math.max(1, Math.round(amount * (hasTalent("kwash") ? 0.6 : 1)));
+}
+
+/** 因果债累积：使用逆天道具/秘术产生，善业不沾天赋可削减；≥200 触发命运劫死亡 */
+function addKarmaDebt(amount: number) {
+	player.karmaDebt += Math.max(1, Math.round(amount * (hasTalent("causal") ? 0.7 : 1)));
+	if (player.karmaDebt >= 200) {
+		die("debt");
+	}
+}
+
+/** 寿元变化：自然流逝、战斗消耗、丹药补充；归零即死 */
+function addLifespan(delta: number) {
+	player.lifespan = Math.max(0, Math.min(lifespanMax, player.lifespan + delta));
+	if (player.lifespan <= 0) {
+		die("lifespan");
+	}
+}
+
+/**
+ * 濒死判定：血量归零时先检查残魂因果玉（每世限 3 次原地满血复活），
+ * 无玉或次数耗尽则按死因进入轮回。返回 true 表示已由本函数处理（复活或死亡）。
+ */
+function checkNearDeath(cause: DeathCause): boolean {
+	if (player.hp > 0) return false;
+	if (player.pills.souljade > 0 && player.souljadeUsed < 3) {
+		player.pills.souljade -= 1;
+		player.souljadeUsed += 1;
+		player.hp = maxHp;
+		addKarmaDebt(40);
+		addLog(`残魂因果玉碎裂，你于濒死之际原地复生（剩余 ${3 - player.souljadeUsed} 次）。`, "warning");
+		return true;
+	}
+	die(cause);
+	return true;
+}
+
+/** 死亡结算：计算记忆碎片，打开轮回殿 */
+function die(cause: DeathCause) {
+	stopMeditation();
+	battle = null;
+	showThunderModal = false;
+	showBreakthroughModal = false;
+	enhanceId = null;
+	saveModalMode = null;
+
+	const firstClearCount = Object.keys(player.defeated).filter((k) => player.defeated[k]).length;
+	const shards = 50 + player.realmIndex * 15 + player.towerFloor * 2 + firstClearCount * 10;
+	player.memoryShards += shards;
+	player.rebirths += 1;
+	deathCause = cause;
+	rebirthReport = { shards, cause };
+	showRebirthModal = true;
+
+	const t = DEATH_TEXTS[cause];
+	addLog(`${t.title} —— ${t.desc} 获得 ${shards} 记忆碎片。`, "danger");
+	save();
+}
+
+/** 转世重生：清空本世修为/功法/法宝，保留记忆碎片/轮回天赋/轮回次数 */
+function reincarnate() {
+	const kept = {
+		memoryShards: player.memoryShards,
+		rebirths: player.rebirths,
+		talents: [...player.talents],
+	};
+	player = makeFreshPlayer();
+	player.memoryShards = kept.memoryShards;
+	player.rebirths = kept.rebirths;
+	player.talents = kept.talents;
+	if (hasTalent("rich")) player.stones += 500;
+
+	// 重置创角转盘，重新测天命
+	aptitudeResult = null;
+	rootComboResult = null;
+	physiqueResult = null;
+	showRebirthModal = false;
+	deathCause = null;
+	rebirthReport = null;
+	addLog(`第 ${player.rebirths + 1} 世轮回开启。前世记忆化作 ${kept.memoryShards} 枚碎片，可入轮回殿参悟天赋。`, "warning");
+	save();
+}
+
+/** 轮回商店：消耗记忆碎片购买永久天赋（跨周目生效） */
+function buyTalent(t: RebirthTalent) {
+	if (player.talents.includes(t.id) || player.memoryShards < t.cost) return;
+	player.memoryShards -= t.cost;
+	player.talents.push(t.id);
+	// 「富甲一方」购买后立即补发本周目灵石
+	if (t.id === "rich") player.stones += 500;
+	addLog(`轮回殿参悟成功：「${t.name}」已烙印神魂，生生世世生效。`, "success");
+	save();
+}
+
+/** 每 30 息打坐自然流逝 1 年寿元；每场战斗额外消耗 2 年 */
+function lifespanTick() {
+	if (player.totalBreaths > 0 && player.totalBreaths % 30 === 0) {
+		addLifespan(-1);
+	}
 }
 
 // ==================== 法宝装备 ====================
@@ -1264,6 +1472,8 @@ function breathTick() {
 	if (player.totalBreaths % 60 === 0) {
 		player.stones += 5 + player.realmIndex * 3;
 	}
+	// v9 每 30 息自然流逝 1 年寿元（归零触发轮回）
+	lifespanTick();
 	lastGain = xpGain;
 	save();
 }
@@ -1306,15 +1516,17 @@ function portal(node: HTMLElement) {
 }
 
 // 任意弹窗打开时锁定背景滚动，关闭后恢复
-$effect(() => {
-	if (
-		showThunderModal ||
-		showBreakthroughModal ||
-		battle !== null ||
-		saveModalMode !== null ||
-		enhanceId !== null ||
-		offlineReport !== null
-	) {
+	$effect(() => {
+		if (
+			showThunderModal ||
+			showBreakthroughModal ||
+			battle !== null ||
+			saveModalMode !== null ||
+			enhanceId !== null ||
+			offlineReport !== null ||
+			showRebirthModal ||
+			showRebirthShop
+		) {
 		const prev = document.body.style.overflow;
 		document.body.style.overflow = "hidden";
 		return () => {
@@ -1368,6 +1580,20 @@ function usePill(pill: Pill) {
 		case "jiuzhuan":
 			player.xp += 15000;
 			addLog("九转金丹入口即化，修为狂涨 15000 点！！", "success");
+			break;
+		case "shouyuan":
+			addLifespan(80);
+			addLog("你服下一颗延寿丹，生机焕发，寿元 +80 载。", "success");
+			break;
+		case "timesand":
+			player.hp = maxHp;
+			addKarmaDebt(30);
+			addLog("光阴碎片流转，你回溯至巅峰状态（气血回满），因果债 +30。", "success");
+			break;
+		case "souljade":
+			// 残魂玉为被动护身法宝，不可主动服用：退回库存
+			player.pills.souljade += 1;
+			addLog("残魂因果玉需贴身佩戴，濒死时会自动碎裂护主，无法主动服用。", "warning");
 			break;
 	}
 	save();
@@ -1459,6 +1685,9 @@ function startBattle(tpl: EnemyTemplate, index: number) {
 		return;
 	}
 	const enemy = getEnemy(tpl);
+	// v9 每场斗法消耗 2 年寿元
+	addLifespan(-2);
+	if (showRebirthModal) return; // 寿元耗尽直接入轮回，不再开战
 	battle = {
 		tplId: tpl.id,
 		source: "arena",
@@ -1560,6 +1789,8 @@ function finishBattleWin(tpl: EnemyTemplate) {
 	player.xp += total;
 	player.battlesWon += 1;
 	player.cooldowns[tpl.id] = BATTLE_COOLDOWN;
+	// v9 斗法胜者 +3 业力
+	addKarma(3);
 
 	// 灵石赏金：50×(对手序号+1)，首通翻倍
 	const stoneGain = 50 * (idx + 1) * (first ? 2 : 1);
@@ -1604,19 +1835,20 @@ function finishBattleWin(tpl: EnemyTemplate) {
 	save();
 }
 
-/** 败北结算：扣 5% 修为、气血见底 */
+/** 败北结算：扣 5% 修为、气血见底；血量归零走 v9 濒死判定（残魂玉可复活，否则入轮回） */
 function finishBattleLose() {
 	const b = battle;
 	if (!b) return;
 	const loss = Math.floor(player.xp * 0.05);
 	player.xp = Math.max(0, player.xp - loss);
 	player.battlesLost += 1;
-	player.hp = 0;
 	b.status = "lose";
 	b.reward = loss;
 	battlePushLog(`你灵力枯竭倒在台上，损失 ${loss} 修为，气血见底。`, "danger");
 	addLog(`斗法台 · 你不敌「${b.enemyName}」（战力 ${b.epower}），力竭败退，损失 ${loss} 修为。`, "danger");
 	save();
+	// 血量归零 → 濒死判定（残魂玉复活或血溅当场入轮回；入轮回会关闭战斗弹窗）
+	checkNearDeath("battle");
 }
 
 function closeBattle() {
@@ -1649,6 +1881,9 @@ function startTowerBattle() {
 	}
 	const n = player.towerFloor + 1;
 	const e = towerEnemyStats(n);
+	// v9 每场试炼消耗 2 年寿元
+	addLifespan(-2);
+	if (showRebirthModal) return; // 寿元耗尽直接入轮回，不再入塔
 	battle = {
 		tplId: "tower",
 		source: "tower",
@@ -1681,6 +1916,8 @@ function finishTowerWin() {
 	player.towerFloor = Math.max(player.towerFloor, n);
 	player.battlesWon += 1;
 	player.cooldowns["tower"] = BATTLE_COOLDOWN;
+	// v9 试炼胜者 +2 业力
+	addKarma(2);
 	const stoneGain = 40 + 15 * n;
 	player.stones += stoneGain;
 	const xpGain = Math.round(b.epower * 0.4);
@@ -1701,11 +1938,12 @@ function finishTowerWin() {
 	save();
 }
 
-/** 试炼失败：无惩罚，气血见底但修为无损，可随时重试 */
+/** 试炼失败：无死亡惩罚，保留 1 点气血被传送出塔，可随时重试 */
 function finishTowerLose() {
 	const b = battle;
 	if (!b) return;
 	player.battlesLost += 1;
+	player.hp = Math.max(1, player.hp); // 试炼塔守护机制：不致死亡
 	b.status = "lose";
 	b.reward = 0;
 	battlePushLog("你不敌试炼守将，被传送出塔。试炼并无折损，疗伤后可再战。", "danger");
@@ -1768,6 +2006,14 @@ function doImport() {
 		towerFloor: typeof data.towerFloor === "number" ? data.towerFloor : 0,
 		lastSeen: typeof data.lastSeen === "number" ? data.lastSeen : Date.now(),
 		log: Array.isArray(data.log) ? data.log : [],
+		// v9 旧档兜底：寿元默认当前境界上限
+		lifespan: typeof data.lifespan === "number" ? data.lifespan : REALMS[data.realmIndex ?? 0]?.lifespan ?? 100,
+		karma: typeof data.karma === "number" ? data.karma : 0,
+		karmaDebt: typeof data.karmaDebt === "number" ? data.karmaDebt : 0,
+		memoryShards: typeof data.memoryShards === "number" ? data.memoryShards : 0,
+		rebirths: typeof data.rebirths === "number" ? data.rebirths : 0,
+		talents: Array.isArray(data.talents) ? data.talents : [],
+		souljadeUsed: typeof data.souljadeUsed === "number" ? data.souljadeUsed : 0,
 	};
 	// 气血兜底：炼体功法/淬体丹变化后可能超上限
 	player.hp = Math.max(0, Math.min(player.hp ?? maxHp, maxHp));
@@ -1815,8 +2061,15 @@ function tankThunder() {
 		thunderRound += 1;
 		save();
 		if (thunderRound > 3) {
+			const failCount = thunderResults.filter((r) => r === "fail").length;
 			setTimeout(() => {
 				showThunderModal = false;
+				// v9 三道天雷全败 → 天劫陨落（濒死判定，残魂玉可救命）
+				if (failCount >= 3) {
+					player.hp = 0;
+					checkNearDeath("thunder");
+					return;
+				}
 				doBreakthroughCheck(Math.max(0.15, lastSuccessRate - thunderPenalty));
 			}, 900);
 		}
@@ -1853,12 +2106,21 @@ function doBreakthroughCheck(rate: number) {
 
 	setTimeout(() => {
 		if (Math.random() < rate) {
+			const oldMax = lifespanMax;
 			player.realmIndex += 1;
 			player.lastBreakthrough = new Date().toLocaleString("zh-CN");
 			// 境界提升后气血回满，以示庆贺且避免新境界残血
 			player.hp = maxHp;
+			// v9 突破增寿：补回新旧寿元上限差值的一半
+			player.lifespan = Math.min(lifespanMax, player.lifespan + Math.round((lifespanMax - oldMax) * 0.5));
+			// v9 渡劫成功洗涤业力（-30%）、消解部分因果债（-15）
+			player.karma = Math.round(player.karma * 0.7);
+			player.karmaDebt = Math.max(0, player.karmaDebt - 15);
 			breakthroughResult = "success";
-			addLog(`恭喜！你成功突破至 ${REALMS[player.realmIndex].name}！${usedPojing ? "（破境丹之效）" : ""}`, "success");
+			addLog(
+				`恭喜！你成功突破至 ${REALMS[player.realmIndex].name}！寿元得天地反哺，业力随雷劫洗去三分。${usedPojing ? "（破境丹之效）" : ""}`,
+				"success",
+			);
 		} else {
 			const loss = Math.floor(player.xp * 0.15);
 			player.xp = Math.max(0, player.xp - loss);
@@ -1871,16 +2133,9 @@ function doBreakthroughCheck(rate: number) {
 }
 
 function resetGame() {
-	if (!confirm("确定要兵解转世，重新来过吗？（修为、境界、丹药、功法、斗法战绩、天命全部清空）")) return;
-	stopMeditation();
-	battle = null;
-	saveModalMode = null;
-	player = makeFreshPlayer();
-	aptitudeResult = null;
-	rootComboResult = null;
-	physiqueResult = null;
-	addLog("你兵解转世，一缕真灵投入轮回，静待天命重测。", "warning");
-	save();
+	if (!confirm("确定要兵解转世，自行兵解入轮回吗？（本世修为、境界、丹药、功法、法宝全部清空；记忆碎片与轮回天赋保留）")) return;
+	// v9 兵解转世：走统一轮回结算流程
+	die("bingjie");
 }
 
 function closeModal() {
@@ -2003,6 +2258,15 @@ function closeModal() {
 				{#if player.battlesWon > 0}
 					<span class="talent-tag battle-tag">斩妖 ×{player.battlesWon}</span>
 				{/if}
+				{#if player.karma > 0}
+					<span class="talent-tag karma-tag">业力 {player.karma}</span>
+				{/if}
+				{#if player.karmaDebt > 0}
+					<span class="talent-tag debt-tag">因果债 {player.karmaDebt}</span>
+				{/if}
+				{#if player.rebirths > 0}
+					<span class="talent-tag rebirth-tag">轮回 {player.rebirths}</span>
+				{/if}
 			</div>
 
 			<p class="realm-desc">{currentRealm.description}</p>
@@ -2028,6 +2292,18 @@ function closeModal() {
 					</div>
 					<div class="hp-bar">
 						<div class="hp-fill" class:hp-low-fill={hpPercent < 30} style="width: {hpPercent}%"></div>
+					</div>
+				</div>
+				<!-- v9 寿元条：暮年 / 残烛变色 -->
+				<div class="hp-block lifespan-block">
+					<div class="stat-label">
+						<span>寿元</span>
+						<span class:lifespan-old={lifespanRatio < 0.3} class:lifespan-candle={lifespanRatio < 0.1}>
+							{lifespanRatio < 0.1 ? "残烛 " : lifespanRatio < 0.3 ? "暮年 " : ""}{player.lifespan} / {lifespanMax}
+						</span>
+					</div>
+					<div class="hp-bar">
+						<div class="hp-fill lifespan-fill" class:old-fill={lifespanRatio < 0.3} class:candle-fill={lifespanRatio < 0.1} style="width: {Math.round(lifespanRatio * 100)}%"></div>
 					</div>
 				</div>
 				<div class="stat-grid">
@@ -2094,10 +2370,11 @@ function closeModal() {
 			<span>斗法战绩: {player.battlesWon} 胜 / {player.battlesLost} 负</span>
 			{#if player.lastBreakthrough}<span>上次突破: {player.lastBreakthrough}</span>{/if}
 			<span class="stats-actions">
-				<button class="reset-btn" onclick={() => openSaveModal("export")}>导出存档</button>
-				<button class="reset-btn" onclick={() => openSaveModal("import")}>导入存档</button>
-				<button class="reset-btn" onclick={resetGame}>兵解转世</button>
-			</span>
+					<button class="reset-btn" onclick={() => openSaveModal("export")}>导出存档</button>
+					<button class="reset-btn" onclick={() => openSaveModal("import")}>导入存档</button>
+					<button class="reset-btn" onclick={resetGame}>兵解转世</button>
+					<button class="reset-btn" onclick={() => (showRebirthShop = true)}>轮回殿</button>
+				</span>
 		</div>
 		</div>
 
@@ -2263,7 +2540,7 @@ function closeModal() {
 				<span class="pill-subtitle">高阶丹药需对应境界 · 炼制有失败率，失败损失药材</span>
 			</div>
 			<div class="pill-list">
-				{#each PILLS as pill (pill.id)}
+					{#each CRAFT_PILLS as pill (pill.id)}
 					{@const locked = player.realmIndex < pill.minRealm}
 					{@const craftRate = Math.round(craftSuccessRate(pill.minRealm) * 100)}
 					<div class="pill-item" class:pill-locked={locked}>
@@ -2295,7 +2572,7 @@ function closeModal() {
 		<div class="pill-card">
 			<div class="pill-header">
 				<h3 class="pill-title">坊市</h3>
-				<span class="pill-subtitle">灵石交易 · 当前灵石 {player.stones.toLocaleString()}</span>
+				<span class="pill-subtitle">灵石交易 · 延寿丹与因果奇物有售 · 当前灵石 {player.stones.toLocaleString()}</span>
 			</div>
 			<div class="pill-list">
 				{#each SHOP_PILLS as pill (pill.id)}
@@ -2561,13 +2838,70 @@ function closeModal() {
 					<p class="save-desc">把之前导出的存档码完整粘贴到下方，导入会覆盖当前进度（建议先导出当前存档备份）。</p>
 					<textarea class="save-code" bind:value={importCode} rows="6" placeholder="在此粘贴存档码..."></textarea>
 					<div class="save-actions">
-						<button class="btn" disabled={importCode.trim().length === 0} onclick={doImport}>确认导入</button>
-						<button class="btn btn-ghost" onclick={closeSaveModal}>取消</button>
-					</div>
-				{/if}
+							<button class="btn" disabled={importCode.trim().length === 0} onclick={doImport}>确认导入</button>
+							<button class="btn btn-ghost" onclick={closeSaveModal}>取消</button>
+						</div>
+					{/if}
+				</div>
 			</div>
-		</div>
-	{/if}
+		{/if}
+
+		<!-- ========== v9 轮回结算弹窗 ========== -->
+		{#if showRebirthModal && rebirthReport && deathCause}
+			<div class="modal-overlay" use:portal>
+				<div class="modal-content rebirth-modal" onclick={(e) => e.stopPropagation()}>
+					<h3 class="rebirth-title">{DEATH_TEXTS[deathCause].title}</h3>
+					<p class="rebirth-desc">{DEATH_TEXTS[deathCause].desc}</p>
+					<div class="rebirth-stats">
+						<div class="offline-reward">
+							<span class="offline-key">记忆碎片</span>
+							<span class="offline-val">+{rebirthReport.shards}</span>
+						</div>
+						<div class="offline-reward">
+							<span class="offline-key">累计碎片</span>
+							<span class="offline-val">{player.memoryShards}</span>
+						</div>
+						<div class="offline-reward">
+							<span class="offline-key">轮回次数</span>
+							<span class="offline-val">{player.rebirths}</span>
+						</div>
+					</div>
+					<p class="rebirth-tip">记忆碎片可在「轮回殿」兑换永久天赋，伴随后续每一世。</p>
+					<button class="btn breakthrough-btn" onclick={reincarnate}>真灵投胎 · 开启第 {player.rebirths + 1} 世</button>
+				</div>
+			</div>
+		{/if}
+
+		<!-- ========== v9 轮回殿（记忆碎片商店） ========== -->
+		{#if showRebirthShop}
+			<div class="modal-overlay" use:portal onclick={() => (showRebirthShop = false)}>
+				<div class="modal-content rebirth-shop-modal" onclick={(e) => e.stopPropagation()}>
+					<h3 class="rebirth-title">轮回殿</h3>
+					<p class="rebirth-desc">当前记忆碎片：<strong>{player.memoryShards}</strong> · 已轮回 {player.rebirths} 次</p>
+					<div class="talent-shop-list">
+						{#each REBIRTH_TALENTS as t (t.id)}
+							{@const owned = player.talents.includes(t.id)}
+							{@const afford = player.memoryShards >= t.cost}
+							<div class="talent-shop-item" class:owned class:afford={!owned && afford}>
+								<div class="pill-info">
+									<div class="pill-name" style={`color: ${t.color}`}>
+										{t.name}
+										{#if owned}<span class="pill-count">已悟</span>{/if}
+									</div>
+									<div class="pill-desc">{t.desc}</div>
+								</div>
+								<div class="pill-actions">
+									<button class="btn pill-buy" disabled={owned || !afford} onclick={() => buyTalent(t)}>
+										{owned ? "已悟" : `${t.cost} 碎片`}
+									</button>
+								</div>
+							</div>
+						{/each}
+					</div>
+					<button class="btn btn-ghost" onclick={() => (showRebirthShop = false)}>离开轮回殿</button>
+				</div>
+			</div>
+		{/if}
 </div>
 
 <style>
@@ -2981,4 +3315,35 @@ button.manual-chip.owned:hover { border-color: rgba(99, 102, 241, 0.6); transfor
 .creation-actions { margin-top: 1.5rem; display: flex; flex-direction: column; align-items: center; gap: 0.75rem; }
 .spin-btn { background: linear-gradient(90deg, #f59e0b, #fbbf24); color: #1c1917; padding: 0.6rem 1.8rem; }
 .creation-result { font-size: 0.95rem; font-weight: 600; margin: 0; }
+
+/* ===== v9 寿元 / 业力 / 轮回 ===== */
+.lifespan-block { margin-top: 0.6rem; }
+.lifespan-old { color: #fbbf24; }
+.lifespan-candle { color: #f87171; font-weight: 700; }
+.lifespan-fill { background: linear-gradient(90deg, #38bdf8, #818cf8); }
+.lifespan-fill.old-fill { background: linear-gradient(90deg, #d97706, #fbbf24); }
+.lifespan-fill.candle-fill { background: linear-gradient(90deg, #b91c1c, #ef4444); animation: candleBlink 1.2s ease-in-out infinite; }
+@keyframes candleBlink { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.7); } }
+
+.karma-tag { border-color: rgba(248, 113, 113, 0.45); color: #f87171; }
+.debt-tag { border-color: rgba(192, 132, 252, 0.45); color: #c084fc; }
+.rebirth-tag { border-color: rgba(240, 171, 252, 0.45); color: #f0abfc; }
+
+.rebirth-modal, .rebirth-shop-modal { max-width: 26rem; text-align: center; }
+.rebirth-title { margin: 0 0 0.5rem; font-size: 1.35rem; color: #f0abfc; }
+.rebirth-desc { font-size: 0.9rem; color: #e2e8f0; margin: 0 0 1rem; line-height: 1.6; }
+.rebirth-desc strong { color: #f0abfc; }
+.rebirth-stats { display: flex; gap: 0.75rem; justify-content: center; margin-bottom: 1rem; }
+.rebirth-tip { font-size: 0.78rem; color: #cbd5e1; margin: 0 0 1rem; }
+
+.talent-shop-list { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; text-align: left; }
+.talent-shop-item {
+	display: flex; align-items: center; gap: 0.7rem;
+	padding: 0.55rem 0.7rem; border-radius: 0.6rem;
+	background: rgba(128, 128, 128, 0.06);
+	border: 1px solid transparent;
+}
+.talent-shop-item.afford { border-color: rgba(240, 171, 252, 0.3); }
+.talent-shop-item.owned { opacity: 0.6; }
+.talent-shop-item .pill-info { flex: 1; min-width: 0; }
 </style>

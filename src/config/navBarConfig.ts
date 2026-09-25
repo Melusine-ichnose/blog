@@ -54,9 +54,9 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 		],
 	});
 
-	// 星际轨道：3D 粒子变形沉浸页（一级入口）
+	// 银河漫游：Three.js 螺旋星系沉浸页（一级入口，整页加载不走 swup）
 	links.push({
-		name: "星际轨道",
+		name: "银河漫游",
 		url: "/galaxy/",
 		icon: "material-symbols:travel-explore",
 	});
@@ -71,16 +71,6 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 				name: "修仙面板",
 				url: "/xiuxian/",
 				icon: "material-symbols:stars",
-			},
-			{
-				name: "修炼日志",
-				url: "/xiuxian/log",
-				icon: "material-symbols:history",
-			},
-			{
-				name: "境界图谱",
-				url: "/xiuxian/map",
-				icon: "material-symbols:map",
 			},
 			{
 				name: "贪吃蛇",

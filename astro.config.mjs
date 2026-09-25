@@ -131,6 +131,9 @@ export default defineConfig({
 				"#floating-toc-wrapper",
 			],
 			smoothScrolling: false,
+                        // 银河漫游页为整屏 Three.js 场景，无 swup 容器结构，
+                        // 让浏览器原生整页跳转进入，避免软导航容器失配
+                        ignoreVisit: (url) => url.startsWith("/galaxy"),
 			cache: true,
 			preload: {
 				hover: true,
