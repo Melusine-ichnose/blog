@@ -51,6 +51,13 @@ const getDynamicNavBarConfig = (): NavBarConfig => {
 				url: "/archive/?category=%E6%BA%90%E7%A0%81%E8%A7%A3%E6%9E%90",
 				icon: "material-symbols:code",
 			},
+
+			// 数字星河：Canvas 粒子特效沉浸页
+			{
+				name: "数字星河",
+				url: "/galaxy/",
+				icon: "material-symbols:travel-explore",
+			},
 		],
 	});
 

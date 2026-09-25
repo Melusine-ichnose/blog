@@ -1,0 +1,224 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import GalaxyCanvas from "@components/pages/GalaxyCanvas.svelte";
+---
+
+<Layout
+  title="数字星河"
+  description="以代码为轨，穿梭数字星河 —— 一场 Canvas 粒子与行星轨道的沉浸航行"
+>
+  <div class="galaxy-page">
+    <GalaxyCanvas client:load />
+
+    <!-- 入场遮罩：标题打字 + 辉光，点击"进入星河"后曲速冲刺 -->
+    <div id="galaxy-intro" class="galaxy-intro" role="dialog" aria-label="数字星河入口">
+      <div class="intro-inner">
+        <p class="intro-tag"><span id="galaxy-typewriter"></span><span class="caret">▋</span></p>
+        <h1 class="intro-title">
+          <span class="line">以代码为轨</span>
+          <span class="dot"> · </span>
+          <span class="line alt">穿梭数字星河</span>
+        </h1>
+        <p class="intro-sub">0 与 1 化作星尘，字符流勾勒轨道 —— 一场属于代码的宇宙航行</p>
+        <button id="galaxy-enter" class="intro-btn" type="button">
+          进入星河
+          <span class="enter-arrow">→</span>
+        </button>
+        <p class="intro-hint">移动鼠标操控航向 · 点击任意处激起星尘爆发</p>
+      </div>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  // 标题打字机：逐字打出代码风格标语（纯 JS，.astro 内联脚本不经 TS 编译）
+  const PHRASE = "// CODE AS ORBIT · GALAXY.SHUTTLE";
+  const tw = document.getElementById("galaxy-typewriter");
+  const intro = document.getElementById("galaxy-intro");
+  const btn = document.getElementById("galaxy-enter");
+
+  if (tw) {
+    let i = 0;
+    const timer = setInterval(() => {
+      tw.textContent = PHRASE.slice(0, (i += 1));
+      if (i >= PHRASE.length) clearInterval(timer);
+    }, 55);
+  }
+
+  if (btn && intro) {
+    btn.addEventListener("click", () => {
+      intro.classList.add("is-leaving");
+      // 通知 Canvas 引擎进入曲速冲刺
+      window.dispatchEvent(new CustomEvent("galaxy:warp"));
+      // 过渡结束后彻底关闭遮罩，让出指针事件
+      setTimeout(() => intro.remove(), 1200);
+    });
+  }
+</script>
+
+<style>
+  .galaxy-page {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    overflow: hidden;
+    background: #05060f;
+  }
+
+  .galaxy-intro {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 1.5rem;
+    background: radial-gradient(ellipse at center, rgba(5, 6, 15, 0.35) 0%, rgba(5, 6, 15, 0.78) 100%);
+    backdrop-filter: blur(2px);
+    transition:
+      opacity 1s ease,
+      transform 1s ease;
+  }
+  .galaxy-intro.is-leaving {
+    opacity: 0;
+    transform: scale(1.06);
+    pointer-events: none;
+  }
+
+  .intro-inner {
+    max-width: 46rem;
+  }
+
+  .intro-tag {
+    font-family:
+      ui-monospace, "JetBrains Mono", Consolas, monospace;
+    font-size: 0.85rem;
+    letter-spacing: 0.18em;
+    color: #67e8f9;
+    min-height: 1.4em;
+    margin-bottom: 1.4rem;
+    text-shadow: 0 0 14px rgba(103, 232, 249, 0.55);
+  }
+  .caret {
+    animation: blink 1s steps(1) infinite;
+    color: #818cf8;
+  }
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  .intro-title {
+    font-size: clamp(2rem, 6vw, 4.2rem);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    line-height: 1.35;
+    margin: 0 0 1.2rem;
+    color: #f8fafc;
+  }
+  .intro-title .line {
+    display: inline-block;
+    opacity: 0;
+    transform: translateY(26px);
+    animation: rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    text-shadow: 0 0 30px rgba(129, 140, 248, 0.45);
+  }
+  .intro-title .line:first-child {
+    animation-delay: 0.25s;
+  }
+  .intro-title .dot {
+    opacity: 0;
+    animation: fadeIn 0.6s ease 0.7s forwards;
+    color: #818cf8;
+  }
+  .intro-title .alt {
+    animation-delay: 0.65s;
+    background: linear-gradient(100deg, #67e8f9 10%, #818cf8 55%, #c084fc 90%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    text-shadow: none;
+    filter: drop-shadow(0 0 22px rgba(129, 140, 248, 0.35));
+  }
+
+  .intro-sub {
+    font-size: clamp(0.85rem, 1.8vw, 1rem);
+    color: #94a3b8;
+    letter-spacing: 0.06em;
+    margin: 0 0 2.4rem;
+    opacity: 0;
+    animation: fadeIn 1s ease 1s forwards;
+  }
+
+  .intro-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.85rem 2.2rem;
+    font-family:
+      ui-monospace, "JetBrains Mono", Consolas, monospace;
+    font-size: 0.95rem;
+    letter-spacing: 0.22em;
+    color: #e0f2fe;
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(103, 232, 249, 0.55);
+    border-radius: 999px;
+    cursor: pointer;
+    overflow: hidden;
+    opacity: 0;
+    animation: fadeIn 1s ease 1.3s forwards;
+    transition:
+      box-shadow 0.3s ease,
+      border-color 0.3s ease,
+      background 0.3s ease;
+  }
+  .intro-btn:hover {
+    border-color: #67e8f9;
+    background: rgba(56, 189, 248, 0.18);
+    box-shadow:
+      0 0 28px rgba(103, 232, 249, 0.35),
+      inset 0 0 18px rgba(103, 232, 249, 0.12);
+  }
+  .enter-arrow {
+    transition: transform 0.3s ease;
+  }
+  .intro-btn:hover .enter-arrow {
+    transform: translateX(6px);
+  }
+
+  .intro-hint {
+    margin-top: 1.8rem;
+    font-size: 0.78rem;
+    color: #64748b;
+    letter-spacing: 0.1em;
+    opacity: 0;
+    animation: fadeIn 1s ease 1.6s forwards;
+  }
+
+  @keyframes rise {
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes fadeIn {
+    to {
+      opacity: 1;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .intro-title .line,
+    .intro-title .dot,
+    .intro-sub,
+    .intro-btn,
+    .intro-hint {
+      animation: none;
+      opacity: 1;
+      transform: none;
+    }
+  }
+</style>
