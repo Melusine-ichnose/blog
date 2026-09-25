@@ -1,8 +1,7 @@
 <script lang="ts">
-// 修仙修炼游戏核心组件 v4
+// 修仙修炼游戏核心组件 v5
 // 三转盘创角（资质/灵根/体质，仿蛊真人体系）+ 持续打坐 + 雷劫渡劫
-// 事件系统：心魔劫、妖兽来袭、坊市奇遇、道友论道、灵脉喷发
-// 丹药体系：按境界解锁炼制，收益恒大于成本
+// 事件系统：加权随机事件池（每息独立抽取，无固定优先级）
 // 数据存储在 localStorage，纯前端实现
 
 import { onDestroy } from "svelte";
@@ -79,15 +78,16 @@ interface PlayerState {
 	lastBreakthrough: string | null;
 	totalBreaths: number;
 	pills: Record<PillId, number>;
-	ningshenLeft: number; // 凝神丹剩余息数
-	wudaoLeft: number; // 悟道丹剩余息数（机缘×3）
+	ningshenLeft: number; // 凝神丹剩余息数（收益×2）
+	springLeft: number; // 灵泉沐浴剩余息数（收益×2）
+	wudaoLeft: number; // 悟道丹剩余息数（机缘权重×3）
 	veinLeft: number; // 灵脉剩余息数（收益×3）
 	pojingActive: boolean;
 	aptitude: string | null; // 资质 id
 	rootCombo: string | null; // 灵根组合 id
 	spiritualRoots: string[]; // 五行灵根 id 数组
 	physique: string | null;
-	thunderPassed: number;
+	thunderPassed: number; // 累计渡过天雷数
 	battlesWon: number; // 累计战胜妖兽数
 	log: LogEntry[];
 }
@@ -96,6 +96,31 @@ interface LogEntry {
 	time: string;
 	message: string;
 	type: "info" | "success" | "danger" | "warning";
+}
+
+/** 随机事件执行结果 */
+interface EventResult {
+	/** 本息修为额外倍率（与基础收益相乘） */
+	mult?: number;
+	/** 本息修为固定增减（可为负） */
+	delta?: number;
+	/** 是否中断打坐（抉择类事件） */
+	interrupt?: boolean;
+}
+
+/** 通用抉择弹窗 */
+interface ChoiceOption {
+	label: string;
+	primary?: boolean;
+	disabled?: boolean;
+	action: () => void;
+}
+interface ChoiceModalState {
+	title: string;
+	color: string;
+	text: string;
+	options: ChoiceOption[];
+	resolving: boolean;
 }
 
 // ==================== 常量 ====================
@@ -118,7 +143,7 @@ const PILLS: Pill[] = [
 	{ id: "ningshen", name: "凝神丹", color: "#60a5fa", desc: "30 息修炼收益翻倍", cost: 250, minRealm: 1 },
 	{ id: "pojing", name: "破境丹", color: "#c084fc", desc: "突破+25%；渡劫可挡一道天雷", cost: 600, minRealm: 2 },
 	{ id: "tianyuan", name: "天元丹", color: "#fbbf24", desc: "服下 +2500 修为", cost: 1200, minRealm: 3 },
-	{ id: "wudao", name: "悟道丹", color: "#f472b6", desc: "60 息内机缘概率 ×3", cost: 2500, minRealm: 4 },
+	{ id: "wudao", name: "悟道丹", color: "#f472b6", desc: "60 息内机缘事件概率 ×3", cost: 2500, minRealm: 4 },
 	{ id: "jiuzhuan", name: "九转金丹", color: "#fb923c", desc: "服下 +15000 修为", cost: 6000, minRealm: 5 },
 ];
 
@@ -169,6 +194,7 @@ const CULTIVATE_TEXTS = [
 	"丹田之中，灵力如江河奔涌...",
 ];
 
+/** 普通奇遇文案 */
 const FORTUNE_EVENTS = [
 	{ text: "你发现了一株百年灵药，修为大涨！", xpMultiplier: 3 },
 	{ text: "你在古洞府中领悟了前辈留下的功法，修为大增！", xpMultiplier: 5 },
@@ -203,6 +229,7 @@ let player = $state<PlayerState>({
 	totalBreaths: 0,
 	pills: { ...EMPTY_PILLS },
 	ningshenLeft: 0,
+	springLeft: 0,
 	wudaoLeft: 0,
 	veinLeft: 0,
 	pojingActive: false,
@@ -227,7 +254,7 @@ let spinningKind = $state<WheelKind | null>(null);
 let aptitudeResult = $state<Aptitude | null>(null);
 let rootComboResult = $state<RootCombo | null>(null);
 let physiqueResult = $state<Physique | null>(null);
-let wheelIndex = $state(0); // 当前转动的转盘高亮指针
+let wheelIndex = $state(0);
 
 // ---- 雷劫状态 ----
 let showThunderModal = $state(false);
@@ -245,9 +272,8 @@ let showBeastModal = $state(false);
 let beastResolving = $state(false);
 let beastName = $state("");
 
-// ---- 坊市奇遇状态 ----
-let showMarketModal = $state(false);
-let marketOffer = $state<{ pill: Pill; price: number } | null>(null);
+// ---- 通用抉择弹窗（坊市 / 拍卖 / 散修求助） ----
+let choiceModal = $state<ChoiceModalState | null>(null);
 
 // ==================== 计算属性 ====================
 
@@ -260,7 +286,6 @@ const progressPercent = $derived(
 );
 const canBreakthrough = $derived(Boolean(nextRealm && player.xp >= nextRealm.requiredXp));
 
-/** 三项天命都测完才算完成创角 */
 const needCreation = $derived(!player.aptitude || !player.rootCombo || !player.physique);
 
 const currentAptitude = $derived(APTITUDES.find((a) => a.id === player.aptitude) ?? null);
@@ -268,7 +293,6 @@ const currentCombo = $derived(ROOT_COMBOS.find((c) => c.id === player.rootCombo)
 const currentPhysique = $derived(PHYSIQUES.find((p) => p.id === player.physique) ?? null);
 const comboMult = $derived(currentCombo?.mult ?? 0);
 
-/** 灵根效果（基数 × 组合倍率 × 数量不叠加同种） */
 const hasRoot = (id: string) => player.spiritualRoots.includes(id);
 const rootBreakBonus = $derived(hasRoot("jin") ? ROOT_BASE.jin.breakBonus * comboMult : 0);
 const rootFortuneProb = $derived(hasRoot("mu") ? ROOT_BASE.mu.fortuneProb * comboMult : 0);
@@ -276,22 +300,24 @@ const rootXpMult = $derived(1 + (hasRoot("shui") ? ROOT_BASE.shui.xpMult * combo
 const rootDemonLossMult = $derived(1 - (hasRoot("huo") ? ROOT_BASE.huo.demonLossCut * comboMult : 0));
 const rootDemonProbCut = $derived(hasRoot("tu") ? ROOT_BASE.tu.demonProbCut * comboMult : 0);
 
-/** 机缘概率：基础 6% + 木灵根 + 丁等资质 + 伪灵根全事件加成；森海轮回体翻倍；悟道丹 ×3 */
-const fortuneProb = $derived.by(() => {
-	let p = 0.06 + rootFortuneProb + (currentAptitude?.fortuneBonus ?? 0) + (currentCombo?.allEventBonus ?? 0);
-	p *= currentPhysique?.fortuneMult ?? 1;
-	if (player.wudaoLeft > 0) p *= 3;
-	return p;
-});
+/** 机缘类事件的权重系数：木灵根、丁等资质提升；悟道丹 ×3；森海轮回体翻倍 */
+const fortuneFactor = $derived(
+	(1 + rootFortuneProb * 5 + (currentAptitude?.fortuneBonus ?? 0) * 5) *
+		(player.wudaoLeft > 0 ? 3 : 1) *
+		(currentPhysique?.fortuneMult ?? 1),
+);
 
-/** 心魔概率：基础 6% - 土灵根 + 体质增减 + 伪灵根加成；冰魄体免疫 */
-const demonProb = $derived.by(() => {
+/** 心魔出现权重（0 表示心魔事件不入池，如北冥冰魄体） */
+const demonWeight = $derived.by(() => {
 	if (currentPhysique?.demonImmune) return 0;
-	let p = 0.06 - rootDemonProbCut + (currentPhysique?.demonProbDelta ?? 0) + (currentCombo?.allEventBonus ?? 0);
-	return Math.max(0, p);
+	const p = Math.max(
+		0,
+		0.06 - rootDemonProbCut + (currentPhysique?.demonProbDelta ?? 0) + (currentCombo?.allEventBonus ?? 0),
+	);
+	return p * 400; // 概率 → 相对权重（0.06 ≈ 24）
 });
 
-/** 突破成功率：目标越高越难，保底 30% */
+/** 突破成功率 */
 const successRate = $derived.by(() => {
 	if (!nextRealm) return 0;
 	const base = Math.max(0.3, 0.9 - nextRealm.level * 0.06);
@@ -303,7 +329,7 @@ const successRate = $derived.by(() => {
 	return Math.min(0.95, base + bonus);
 });
 
-/** 每息修为：随境界增长 × 资质 × 水灵根 × 体质；灵脉中 ×3 */
+/** 每息基础修为 */
 const breathXp = $derived(
 	Math.round(
 		(5 + currentRealm.level * 3) *
@@ -317,6 +343,9 @@ const breathXp = $derived(
 const battleWinRate = $derived(
 	Math.min(0.95, 0.55 + player.realmIndex * 0.05 + (currentPhysique?.battleBonus ?? 0)),
 );
+
+/** 每息事件触发率（伪灵根等提升总触发率） */
+const eventChance = $derived(0.28 + (currentCombo?.allEventBonus ?? 0));
 
 // ==================== 持久化 ====================
 
@@ -374,9 +403,22 @@ function addLog(message: string, type: LogEntry["type"] = "info") {
 	player.log = [{ time, message, type }, ...player.log].slice(0, 50);
 }
 
+/** 当前境界可获得的丹药池（机缘/战斗掉落用） */
+function availablePills(): Pill[] {
+	return PILLS.filter((p) => p.minRealm <= player.realmIndex);
+}
+
+/** 随机掉一颗当前境界可得的丹药，返回是否掉了 */
+function grantRandomPill(): boolean {
+	const pool = availablePills();
+	if (pool.length === 0) return false;
+	const pill = pool[Math.floor(Math.random() * pool.length)];
+	player.pills[pill.id] += 1;
+	return true;
+}
+
 // ---------- 创角：三转盘 ----------
 
-/** 加权随机抽取 */
 function weightedPick<T extends { weight: number }>(items: T[]): T {
 	const total = items.reduce((s, i) => s + i.weight, 0);
 	let roll = Math.random() * total;
@@ -387,7 +429,6 @@ function weightedPick<T extends { weight: number }>(items: T[]): T {
 	return items[0];
 }
 
-/** 通用转盘动画：快速滚动逐渐减速，停在加权随机结果上 */
 function spinWheelFor<T extends { weight: number }>(
 	kind: WheelKind,
 	items: T[],
@@ -428,7 +469,6 @@ function spinPhysique() {
 	spinWheelFor("physique", PHYSIQUES, (r) => { physiqueResult = r; });
 }
 
-/** 确认创角：灵根按组合数量随机分配五行 */
 function confirmCreation() {
 	if (!aptitudeResult || !rootComboResult || !physiqueResult || player.aptitude) return;
 	player.aptitude = aptitudeResult.id;
@@ -457,76 +497,373 @@ function confirmCreation() {
 	save();
 }
 
-// ---------- 打坐与事件 ----------
+// ---------- 随机事件池 ----------
+
+/** 事件池条目：weight 为相对权重，run 返回本息结算结果 */
+interface PoolEntry {
+	weight: number;
+	run: (base: number) => EventResult | void;
+}
+
+/**
+ * 从加权事件池中随机抽取并执行一个事件。
+ * 每次打坐 tick 独立构建池并加权抽取，事件之间没有固定优先级。
+ */
+function rollRandomEvent(base: number): EventResult {
+	const ff = fortuneFactor;
+	const pool: PoolEntry[] = [];
+
+	// ===== 正面 · 机缘类（权重受灵根/资质/悟道丹/体质影响）=====
+
+	// 普通奇遇：倍率 + 概率掉丹
+	pool.push({
+		weight: 55 * ff,
+		run: () => {
+			const event = FORTUNE_EVENTS[Math.floor(Math.random() * FORTUNE_EVENTS.length)];
+			if (Math.random() < 0.4 && grantRandomPill()) {
+				addLog(`${event.text} 丹缘也随之而至！`, "success");
+			} else {
+				addLog(event.text, "success");
+			}
+			return { mult: event.xpMultiplier };
+		},
+	});
+
+	// 顿悟：稀有高倍率
+	pool.push({
+		weight: 6 * ff,
+		run: () => {
+			const mult = 8 + Math.floor(Math.random() * 5); // 8~12
+			addLog(`你忽闻大道之声，当场顿悟！本息修为 ×${mult}！`, "success");
+			return { mult };
+		},
+	});
+
+	// 道友论道：中等倍率
+	pool.push({
+		weight: 28 * ff,
+		run: () => {
+			const mult = 2 + Math.floor(Math.random() * 3); // 2~4
+			addLog(`有道友登门论道，一番印证让你获益匪浅（收益 ×${mult}）！`, "success");
+			return { mult };
+		},
+	});
+
+	// 灵脉喷发：30 息三倍 buff
+	pool.push({
+		weight: 9 * ff,
+		run: () => {
+			player.veinLeft += 30;
+			addLog("地底灵脉喷发！灵气如潮，30 息内修炼收益 ×3！", "success");
+		},
+	});
+
+	// 灵泉沐浴：20 息两倍 buff
+	pool.push({
+		weight: 18 * ff,
+		run: () => {
+			player.springLeft += 20;
+			addLog("你寻得一处上古灵泉，泉水沁体，20 息内修炼收益 ×2！", "success");
+		},
+	});
+
+	// 采药老人赠丹
+	pool.push({
+		weight: 16 * ff,
+		run: () => {
+			if (grantRandomPill()) {
+				addLog("山中采药的白发老人见你顺眼，笑着塞给你一颗丹药便飘然而去。", "success");
+			} else {
+				addLog("一位采药老人与你攀谈半日，临走传了你一句吐纳口诀。", "success");
+			}
+			return { mult: 2 };
+		},
+	});
+
+	// 古修遗府：大额固定修为 + 概率掉丹
+	pool.push({
+		weight: 12 * ff,
+		run: () => {
+			const delta = base * 15;
+			const gotPill = Math.random() < 0.35 && grantRandomPill();
+			addLog(
+				gotPill
+					? `你误入一座古修遗府，搜得灵石丹药，修为 +${delta}！`
+					: `你误入一座古修遗府，将府中残余灵气尽数炼化，修为 +${delta}！`,
+				"success",
+			);
+			return { delta };
+		},
+	});
+
+	// 天降异宝：必掉丹药（稀有）
+	pool.push({
+		weight: 6 * ff,
+		run: () => {
+			if (grantRandomPill()) {
+				addLog("夜空流星坠于身前，竟是一枚包裹丹药的奇异玉盒！", "success");
+			}
+			return { mult: 3 };
+		},
+	});
+
+	// 灵兽献瑞：小倍率 + 概率掉丹
+	pool.push({
+		weight: 14 * ff,
+		run: () => {
+			if (Math.random() < 0.3 && grantRandomPill()) {
+				addLog("一只通灵白鹿衔来一枚丹丸赠予你，转身跃入林间。", "success");
+			} else {
+				addLog("一只通灵白鹿绕你三圈而逝，鹿鸣洗心，你灵台一片空明。", "success");
+			}
+			return { mult: 2 };
+		},
+	});
+
+	// ===== 负面 · 天灾类（即时结算，损失按本息收益折算，不伤根基）=====
+
+	// 灵气倒灌
+	pool.push({
+		weight: 16,
+		run: () => {
+			const loss = base * (3 + Math.floor(Math.random() * 3));
+			addLog(`天地灵气骤然倒灌，你经脉一阵刺痛，损失 ${loss} 点修为。`, "danger");
+			return { delta: -loss };
+		},
+	});
+
+	// 旧伤复发
+	pool.push({
+		weight: 10,
+		run: () => {
+			const loss = base * (2 + Math.floor(Math.random() * 2));
+			addLog(`昔日征战留下的暗伤隐隐发作，修为散去 ${loss} 点。`, "warning");
+			return { delta: -loss };
+		},
+	});
+
+	// 空间裂缝（稀有重灾）
+	pool.push({
+		weight: 4,
+		run: () => {
+			const loss = base * (8 + Math.floor(Math.random() * 4));
+			addLog(`一道空间裂缝在身侧撕开，虚空乱流绞散灵力，损失 ${loss} 点修为！`, "danger");
+			return { delta: -loss };
+		},
+	});
+
+	// 瘴气侵体（轻度负面）
+	pool.push({
+		weight: 12,
+		run: () => {
+			const loss = base * (1 + Math.floor(Math.random() * 2));
+			addLog(`山中毒瘴飘过，你屏息驱毒，耗去 ${loss} 点修为。`, "warning");
+			return { delta: -loss };
+		},
+	});
+
+	// ===== 抉择类（中断打坐，弹窗交互）=====
+
+	// 心魔劫
+	if (demonWeight > 0) {
+		pool.push({
+			weight: demonWeight,
+			run: () => {
+				addLog("心魔骤起！你的打坐被迫中断，必须立刻做出抉择...", "danger");
+				showDemonModal = true;
+				demonResolving = false;
+				return { interrupt: true };
+			},
+		});
+	}
+
+	// 妖兽来袭
+	pool.push({
+		weight: 38,
+		run: () => {
+			beastName = ["赤炎狼", "碧鳞蟒", "铁背苍熊", "幽冥豹", "金翅雕", "九尾妖狐", "墨玉麒麟幼兽"][
+				Math.floor(Math.random() * 7)
+			];
+			addLog(`一头「${beastName}」盯上了你的洞府！`, "warning");
+			showBeastModal = true;
+			beastResolving = false;
+			return { interrupt: true };
+		},
+	});
+
+	// 坊市奇遇：六折丹药
+	const marketPool = availablePills();
+	if (marketPool.length > 0) {
+		pool.push({
+			weight: 22,
+			run: () => {
+				const pill = marketPool[Math.floor(Math.random() * marketPool.length)];
+				const price = Math.floor(pill.cost * 0.6);
+				addLog(`云游商贩路过，愿以六折出售「${pill.name}」！`);
+				openChoice({
+					title: "坊市奇遇",
+					color: "#fbbf24",
+					text: `云游商贩神秘一笑，取出「${pill.name}」——${pill.desc}。\n六折现价：${price} 修为（原价 ${pill.cost}）。`,
+					options: [
+						{
+							label: `买下 · ${price} 修为`,
+							primary: true,
+							disabled: player.xp < price,
+							action: () => {
+								player.xp -= price;
+								player.pills[pill.id] += 1;
+								addLog(`你以六折价购得「${pill.name}」，血赚！`, "success");
+								save();
+							},
+						},
+						{
+							label: "离去",
+							action: () => addLog("你婉拒了商贩，对方悻悻离去。"),
+						},
+					],
+				});
+				return { interrupt: true };
+			},
+		});
+	}
+
+	// 拍卖会：七折拍下高一阶丹药
+	const higherPill = PILLS.find((p) => p.minRealm === player.realmIndex + 1) ?? null;
+	if (higherPill) {
+		pool.push({
+			weight: 14,
+			run: () => {
+				const pill = higherPill;
+				const price = Math.floor(pill.cost * 0.7);
+				addLog(`城中召开修士拍卖会，压轴之物竟是「${pill.name}」！`);
+				openChoice({
+					title: "修士拍卖会",
+					color: "#c084fc",
+					text: `压轴拍品「${pill.name}」——${pill.desc}。\n此丹你如今尚不能炼制，七折起拍：${price} 修为。`,
+					options: [
+						{
+							label: `举牌拍下 · ${price} 修为`,
+							primary: true,
+							disabled: player.xp < price,
+							action: () => {
+								player.xp -= price;
+								player.pills[pill.id] += 1;
+								addLog(`你力压群雄拍下「${pill.name}」，全场侧目！`, "success");
+								save();
+							},
+						},
+						{
+							label: "囊中羞涩，放弃",
+							action: () => addLog("你按捺住心动，旁观他人争宝。"),
+						},
+					],
+				});
+				return { interrupt: true };
+			},
+		});
+	}
+
+	// 散修求助：风险投资
+	const begFee = breathXp * 10;
+	pool.push({
+		weight: 20,
+		run: () => {
+			addLog("一名浑身是血的散修跌撞而来，求你资助疗伤，言明日后必报。");
+			openChoice({
+				title: "散修求助",
+				color: "#60a5fa",
+				text: `他要借 ${begFee} 点修为疗伤，许下次日加倍奉还。\n修仙界人心难测，帮或不帮？`,
+				options: [
+					{
+						label: `慷慨解囊 · ${begFee} 修为`,
+						primary: true,
+						disabled: player.xp < begFee,
+						action: () => {
+							player.xp -= begFee;
+							if (Math.random() < 0.6) {
+								// 知恩图报：50% 双倍还修为，50% 赠丹
+								if (Math.random() < 0.5) {
+									player.xp += begFee * 2;
+									addLog(`三日后那散修果然归来，硬塞回你双倍修为（+${begFee * 2}）！`, "success");
+								} else {
+									grantRandomPill();
+									addLog("三日后那散修归来，赠你一颗丹药以报救命之恩！", "success");
+								}
+							} else {
+								addLog("那散修拿了修为便再无音讯……修仙界果然人心难测。", "warning");
+							}
+							save();
+						},
+					},
+					{
+						label: "闭门不见",
+						action: () => addLog("你关上洞府禁制，任他拍门而去。"),
+					},
+				],
+			});
+			return { interrupt: true };
+		},
+	});
+
+	// ===== 加权随机抽取 =====
+	const totalWeight = pool.reduce((s, e) => s + e.weight, 0);
+	let roll = Math.random() * totalWeight;
+	for (const entry of pool) {
+		roll -= entry.weight;
+		if (roll <= 0) {
+			return entry.run(base) ?? {};
+		}
+	}
+	return {};
+}
+
+/** 打开通用抉择弹窗 */
+function openChoice(state: Omit<ChoiceModalState, "resolving">) {
+	choiceModal = { ...state, resolving: false };
+}
+
+/** 执行抉择选项 */
+function resolveChoice(opt: ChoiceOption) {
+	if (!choiceModal || choiceModal.resolving || opt.disabled) return;
+	choiceModal.resolving = true;
+	opt.action();
+	setTimeout(() => {
+		choiceModal = null;
+	}, 600);
+}
+
+// ---------- 打坐 ----------
 
 /** 每息修炼 tick（持续打坐时每 2 秒触发一次） */
 function breathTick() {
 	let xpGain = breathXp + Math.floor(Math.random() * (breathXp * 0.6 + 1));
 
-	// 凝神丹双倍
+	// 限时 buff：凝神丹 ×2、灵泉 ×2、灵脉 ×3（连乘）
 	if (player.ningshenLeft > 0) {
 		xpGain *= 2;
 		player.ningshenLeft -= 1;
 	}
-	// 悟道丹剩余消耗（概率在 fortuneProb 里已算）
-	if (player.wudaoLeft > 0) player.wudaoLeft -= 1;
-	// 灵脉三倍
+	if (player.springLeft > 0) {
+		xpGain *= 2;
+		player.springLeft -= 1;
+	}
 	if (player.veinLeft > 0) {
 		xpGain *= 3;
 		player.veinLeft -= 1;
 	}
+	if (player.wudaoLeft > 0) player.wudaoLeft -= 1;
 
-	// 事件判定（一次 roll，按优先级互斥）
-	const roll = Math.random();
-	if (roll < fortuneProb) {
-		// 机缘：修为倍率 + 40% 掉丹（只掉当前境界可炼的）
-		const event = FORTUNE_EVENTS[Math.floor(Math.random() * FORTUNE_EVENTS.length)];
-		xpGain *= event.xpMultiplier;
-		const available = PILLS.filter((p) => p.minRealm <= player.realmIndex);
-		if (Math.random() < 0.4 && available.length > 0) {
-			const pill = available[Math.floor(Math.random() * available.length)];
-			player.pills[pill.id] += 1;
-			addLog(`${event.text} 并获得一颗「${pill.name}」！`, "success");
-		} else {
-			addLog(event.text, "success");
-		}
-	} else if (roll < fortuneProb + demonProb) {
-		// 心魔劫：中断打坐，弹出抉择
-		stopMeditation();
-		showDemonModal = true;
-		demonResolving = false;
-		addLog("心魔骤起！你的打坐被迫中断，必须立刻做出抉择...", "danger");
-	} else if (roll < fortuneProb + demonProb + 0.04) {
-		// 妖兽来袭：中断打坐，战斗抉择
-		stopMeditation();
-		beastName = ["赤炎狼", "碧鳞蟒", "铁背苍熊", "幽冥豹", "金翅雕"][Math.floor(Math.random() * 5)];
-		showBeastModal = true;
-		beastResolving = false;
-		addLog(`一头「${beastName}」盯上了你的洞府！`, "warning");
-	} else if (roll < fortuneProb + demonProb + 0.04 + 0.03) {
-		// 坊市奇遇：六折丹药，可买可走（不打断打坐）
-		const available = PILLS.filter((p) => p.minRealm <= player.realmIndex);
-		if (available.length > 0) {
-			const pill = available[Math.floor(Math.random() * available.length)];
-			marketOffer = { pill, price: Math.floor(pill.cost * 0.6) };
-			stopMeditation();
-			showMarketModal = true;
-			addLog(`云游商贩路过，愿以六折出售「${pill.name}」！`);
-		}
-	} else if (roll < fortuneProb + demonProb + 0.04 + 0.03 + 0.03) {
-		// 道友论道：直接收益，不打断
-		const mult = 2 + Math.floor(Math.random() * 3);
-		xpGain *= mult;
-		addLog(`有道友登门论道，一番印证让你获益匪浅（收益 ×${mult}）！`, "success");
-	} else if (roll < fortuneProb + demonProb + 0.04 + 0.03 + 0.03 + 0.01) {
-		// 灵脉喷发：30 息三倍收益
-		player.veinLeft += 30;
-		addLog("地底灵脉喷发！灵气如潮，30 息内修炼收益 ×3！", "success");
+	// 事件判定：先掷"本息是否出事"，命中则从加权事件池随机抽一个
+	if (Math.random() < eventChance) {
+		const result = rollRandomEvent(xpGain);
+		if (result.interrupt) stopMeditation();
+		xpGain = xpGain * (result.mult ?? 1) + (result.delta ?? 0);
 	} else if (Math.random() < 0.12) {
+		// 无事发生时低频输出修炼文案
 		addLog(CULTIVATE_TEXTS[Math.floor(Math.random() * CULTIVATE_TEXTS.length)]);
 	}
 
-	player.xp += xpGain;
+	player.xp = Math.max(0, player.xp + xpGain);
 	player.totalBreaths += 1;
 	lastGain = xpGain;
 	save();
@@ -565,16 +902,8 @@ function fightBeast() {
 		const gain = breathXp * (4 + Math.floor(Math.random() * 4));
 		player.xp += gain;
 		player.battlesWon += 1;
-		// 30% 掉妖丹（随机丹药）
-		if (Math.random() < 0.3) {
-			const available = PILLS.filter((p) => p.minRealm <= player.realmIndex);
-			if (available.length > 0) {
-				const pill = available[Math.floor(Math.random() * available.length)];
-				player.pills[pill.id] += 1;
-				addLog(`你斩杀了「${beastName}」！获 ${gain} 修为，并取其妖丹炼出「${pill.name}」！`, "success");
-			} else {
-				addLog(`你斩杀了「${beastName}」！获 ${gain} 修为！`, "success");
-			}
+		if (Math.random() < 0.3 && grantRandomPill()) {
+			addLog(`你斩杀了「${beastName}」！获 ${gain} 修为，并取其妖丹炼出一颗丹药！`, "success");
 		} else {
 			addLog(`你斩杀了「${beastName}」！获 ${gain} 修为！`, "success");
 		}
@@ -593,25 +922,6 @@ function fleeBeast() {
 	player.xp = Math.max(0, player.xp - loss);
 	addLog(`你施展遁术避开了「${beastName}」，耗费 ${loss} 修为。`, "warning");
 	setTimeout(() => { showBeastModal = false; save(); }, 800);
-}
-
-// ---------- 坊市奇遇 ----------
-
-function buyMarketPill() {
-	if (!marketOffer || player.xp < marketOffer.price) return;
-	player.xp -= marketOffer.price;
-	player.pills[marketOffer.pill.id] += 1;
-	addLog(`你以六折价 ${marketOffer.price} 修为购得「${marketOffer.pill.name}」，血赚！`, "success");
-	showMarketModal = false;
-	marketOffer = null;
-	save();
-}
-
-function leaveMarket() {
-	addLog("你婉拒了商贩，对方悻悻离去。");
-	showMarketModal = false;
-	marketOffer = null;
-	save();
 }
 
 // ---------- 打坐开关 ----------
@@ -668,7 +978,7 @@ function usePill(pill: Pill) {
 			break;
 		case "wudao":
 			player.wudaoLeft += 60;
-			addLog("你服下一颗悟道丹，60 息内机缘概率三倍！", "success");
+			addLog("你服下一颗悟道丹，60 息内机缘类事件概率三倍！", "success");
 			break;
 		case "jiuzhuan":
 			player.xp += 15000;
@@ -678,7 +988,6 @@ function usePill(pill: Pill) {
 	save();
 }
 
-/** 炼丹：需达到对应境界 */
 function buyPill(pill: Pill) {
 	if (player.xp < pill.cost || player.realmIndex < pill.minRealm) return;
 	player.xp -= pill.cost;
@@ -792,6 +1101,7 @@ function resetGame() {
 		totalBreaths: 0,
 		pills: { ...EMPTY_PILLS },
 		ningshenLeft: 0,
+		springLeft: 0,
 		wudaoLeft: 0,
 		veinLeft: 0,
 		pojingActive: false,
@@ -806,6 +1116,7 @@ function resetGame() {
 	aptitudeResult = null;
 	rootComboResult = null;
 	physiqueResult = null;
+	choiceModal = null;
 	addLog("你兵解转世，一缕真灵投入轮回，静待天命重测。", "warning");
 	save();
 }
@@ -886,7 +1197,6 @@ function closeModal() {
 				</button>
 			{/if}
 
-			<!-- 确认 -->
 			{#if aptitudeResult && rootComboResult && physiqueResult}
 				<div class="creation-actions">
 					<p class="creation-result">
@@ -903,13 +1213,16 @@ function closeModal() {
 				<span class="realm-badge">第 {currentRealm.level} 重</span>
 				<h2 class="realm-name">{currentRealm.name}</h2>
 				{#if player.ningshenLeft > 0}
-					<span class="buff-badge buff-blue">凝神 ×2 · 余 {player.ningshenLeft} 息</span>
+					<span class="buff-badge buff-blue">凝神 ×2 · {player.ningshenLeft} 息</span>
+				{/if}
+				{#if player.springLeft > 0}
+					<span class="buff-badge buff-cyan">灵泉 ×2 · {player.springLeft} 息</span>
 				{/if}
 				{#if player.wudaoLeft > 0}
-					<span class="buff-badge buff-pink">悟道 ×3 · 余 {player.wudaoLeft} 息</span>
+					<span class="buff-badge buff-pink">悟道 ×3 · {player.wudaoLeft} 息</span>
 				{/if}
 				{#if player.veinLeft > 0}
-					<span class="buff-badge buff-green">灵脉 ×3 · 余 {player.veinLeft} 息</span>
+					<span class="buff-badge buff-green">灵脉 ×3 · {player.veinLeft} 息</span>
 				{/if}
 			</div>
 
@@ -965,7 +1278,7 @@ function closeModal() {
 						{#if isMeditating}
 							<span class="status-running">运转周天中 · 每息约 +{lastGain ?? breathXp}</span>
 						{:else}
-							<span class="status-idle">入定吐纳 · 途中或有机缘、心魔、妖兽、坊市、论道、灵脉</span>
+							<span class="status-idle">入定吐纳 · 奇遇、天灾、抉择随机降临</span>
 						{/if}
 					</div>
 					<button class="btn meditate-btn" class:pause={isMeditating} onclick={toggleMeditation}>
@@ -1139,20 +1452,28 @@ function closeModal() {
 		</div>
 	{/if}
 
-	<!-- ========== 坊市奇遇弹窗 ========== -->
-	{#if showMarketModal && marketOffer}
+	<!-- ========== 通用抉择弹窗（坊市 / 拍卖 / 散修求助） ========== -->
+	{#if choiceModal}
 		<div class="modal-overlay">
-			<div class="modal-content market-modal" onclick={(e) => e.stopPropagation()}>
-				<h3 class="market-title">坊市奇遇</h3>
-				<p class="demon-text">
-					云游商贩愿以 <strong class="market-price">{marketOffer.price}</strong> 修为（原价 {marketOffer.pill.cost}）
-					出售「{marketOffer.pill.name}」——{marketOffer.pill.desc}
-				</p>
+			<div
+				class="modal-content choice-modal"
+				style={`border-color: ${choiceModal.color}55`}
+				onclick={(e) => e.stopPropagation()}
+			>
+				<h3 class="choice-title" style={`color: ${choiceModal.color}`}>{choiceModal.title}</h3>
+				<p class="choice-text">{choiceModal.text}</p>
 				<div class="thunder-actions">
-					<button class="btn breakthrough-btn" disabled={player.xp < marketOffer.price} onclick={buyMarketPill}>
-						{player.xp < marketOffer.price ? "修为不足" : "买下（六折）"}
-					</button>
-					<button class="btn pill-buy" onclick={leaveMarket}>离去</button>
+					{#each choiceModal.options as opt}
+						<button
+							class="btn"
+							class:breakthrough-btn={opt.primary}
+							class:pill-buy={!opt.primary}
+							disabled={choiceModal.resolving || opt.disabled}
+							onclick={() => resolveChoice(opt)}
+						>
+							{opt.label}
+						</button>
+					{/each}
 				</div>
 			</div>
 		</div>
@@ -1227,6 +1548,7 @@ function closeModal() {
 	border-radius: 999px;
 }
 .buff-blue { background: rgba(96, 165, 250, 0.15); color: #60a5fa; }
+.buff-cyan { background: rgba(125, 211, 252, 0.15); color: #7dd3fc; }
 .buff-pink { background: rgba(244, 114, 182, 0.15); color: #f472b6; }
 .buff-green { background: rgba(52, 211, 153, 0.15); color: #34d399; }
 
@@ -1437,6 +1759,7 @@ function closeModal() {
 	font-size: 0.75rem;
 	color: var(--content-meta, #9ca3af);
 	margin-top: 0.1rem;
+	white-space: pre-line;
 }
 .pill-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
 .pill-use, .pill-buy {
@@ -1585,7 +1908,7 @@ function closeModal() {
 	flex-wrap: wrap;
 }
 
-/* ===== 心魔劫 / 妖兽 / 坊市弹窗 ===== */
+/* ===== 心魔 / 妖兽 / 通用抉择弹窗 ===== */
 .demon-modal { border-color: rgba(248, 113, 113, 0.4); }
 .beast-modal { border-color: rgba(239, 68, 68, 0.45); }
 .beast-title {
@@ -1594,24 +1917,23 @@ function closeModal() {
 	color: #ef4444;
 	margin: 0 0 0.5rem;
 }
-.market-modal { border-color: rgba(251, 191, 36, 0.45); }
-.market-title {
-	font-size: 1.3rem;
-	font-weight: 800;
-	color: #fbbf24;
-	margin: 0 0 0.5rem;
-}
-.market-price { color: #fbbf24; }
 .demon-title {
 	font-size: 1.3rem;
 	font-weight: 800;
 	color: #f87171;
 	margin: 0 0 0.5rem;
 }
-.demon-text {
+.demon-text, .choice-text {
 	font-size: 0.9rem;
 	color: var(--content-meta, #9ca3af);
 	margin-bottom: 1.25rem;
+	white-space: pre-line;
+	line-height: 1.6;
+}
+.choice-title {
+	font-size: 1.3rem;
+	font-weight: 800;
+	margin: 0 0 0.5rem;
 }
 
 /* ===== 创角三转盘 ===== */
