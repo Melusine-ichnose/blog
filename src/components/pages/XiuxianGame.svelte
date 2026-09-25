@@ -4,7 +4,7 @@
 // 斗法台（参数化对手、回合制战力模拟）+ 炼丹失败率 + 战斗丹药
 // 数据存储在 localStorage，纯前端实现
 
-import { onDestroy } from "svelte";
+import { onDestroy, onMount } from "svelte";
 
 // ==================== 类型定义 ====================
 
@@ -91,6 +91,20 @@ interface EnemyStats {
 /** 功法槽位：core 主修心法 / body 炼体 / attack 攻伐 */
 type ManualSlot = "core" | "body" | "attack";
 
+/** 法宝槽位：weapon 武器（攻击）/ armor 护甲（防御）/ artifact 法宝（气血上限） */
+type EquipSlot = "weapon" | "armor" | "artifact";
+type EquipRarity = "凡品" | "灵品" | "宝器" | "仙器";
+
+/** 法宝实例（掉落时生成唯一 id，强化等级记录在实例上） */
+interface EquipItem {
+	id: string;
+	name: string;
+	slot: EquipSlot;
+	rarity: EquipRarity;
+	base: number;
+	enhance: number; // 强化等级 0~9，每级 +10%×base（向下取整）
+}
+
 interface Manual {
 	id: string;
 	name: string;
@@ -110,6 +124,8 @@ interface Manual {
 /** 交互式斗法的运行时状态 */
 interface BattleState {
 	tplId: string;
+	source: "arena" | "tower"; // 敌人来源：斗法台 / 试炼塔（复用同一套回合战斗）
+	towerN: number; // 试炼层数（斗法台为 0）
 	enemyName: string;
 	enemyTitle: string;
 	ehp: number;
@@ -124,6 +140,8 @@ interface BattleState {
 	firstClear: boolean; // 本场是否为首通
 	manualName: string | null; // 首通获得的功法名
 	pillName: string | null; // 胜利额外掉落的丹药名
+	stoneGain: number; // 胜利获得的灵石
+	equipName: string | null; // 胜利掉落的法宝名
 }
 
 interface PlayerState {
@@ -151,6 +169,11 @@ interface PlayerState {
 	equipped: Record<ManualSlot, string | null>; // 三槽位装备中的功法
 	defeated: Record<string, boolean>; // 斗法台首通记录（对手 id）
 	cooldowns: Record<string, number>; // 对手 id → 剩余冷却息数
+	stones: number; // 灵石（坊市货币）
+	equip: Record<EquipSlot, EquipItem | null>; // 法宝三槽
+	bag: EquipItem[]; // 行囊（上限 20，溢出折算灵石）
+	towerFloor: number; // 无尽试炼塔已通关最高层
+	lastSeen: number; // 上次存档时间戳（离线闭关结算用）
 	log: LogEntry[];
 }
 
@@ -288,6 +311,52 @@ const MANUAL_SLOTS: { slot: ManualSlot; label: string }[] = [
 	{ slot: "attack", label: "攻伐法术" },
 ];
 
+// ==================== 法宝装备 ====================
+
+/** 法宝槽位展示顺序与文案 */
+const EQUIP_SLOTS: { slot: EquipSlot; label: string }[] = [
+	{ slot: "weapon", label: "武器" },
+	{ slot: "armor", label: "护甲" },
+	{ slot: "artifact", label: "法宝" },
+];
+
+const EQUIP_RARITIES: EquipRarity[] = ["凡品", "灵品", "宝器", "仙器"];
+const EQUIP_RARITY_COLORS: Record<EquipRarity, string> = {
+	凡品: "#9ca3af",
+	灵品: "#34d399",
+	宝器: "#c084fc",
+	仙器: "#fbbf24",
+};
+/** 掉落品质权重：凡 50 / 灵 30 / 宝 15 / 仙 5 */
+const EQUIP_DROP_WEIGHTS = [50, 30, 15, 5];
+/** 行囊上限，满员时掉落按 base×5 折算灵石 */
+const BAG_CAP = 20;
+
+/** 法宝模板池：每槽四件、四个品质各一，基础值按品质递增 */
+const EQUIP_POOL: { tid: string; name: string; slot: EquipSlot; rarity: EquipRarity; base: number }[] = [
+	// 武器：攻击 12 / 18 / 26 / 36
+	{ tid: "qingfeng", name: "青锋剑", slot: "weapon", rarity: "凡品", base: 12 },
+	{ tid: "xuantie", name: "玄铁重剑", slot: "weapon", rarity: "灵品", base: 18 },
+	{ tid: "zidian", name: "紫电青霜", slot: "weapon", rarity: "宝器", base: 26 },
+	{ tid: "zhuxianjian", name: "诛仙四剑", slot: "weapon", rarity: "仙器", base: 36 },
+	// 护甲：防御 8 / 12 / 18 / 25
+	{ tid: "bufu", name: "流云道袍", slot: "armor", rarity: "凡品", base: 8 },
+	{ tid: "xuangui", name: "玄龟宝甲", slot: "armor", rarity: "灵品", base: 12 },
+	{ tid: "zijinjia", name: "紫金锁子甲", slot: "armor", rarity: "宝器", base: 18 },
+	{ tid: "taixu", name: "太虚仙衣", slot: "armor", rarity: "仙器", base: 25 },
+	// 法宝：气血上限 60 / 90 / 140 / 200
+	{ tid: "yangqi", name: "养气玉佩", slot: "artifact", rarity: "凡品", base: 60 },
+	{ tid: "xuanwuyin", name: "玄武印", slot: "artifact", rarity: "灵品", base: 90 },
+	{ tid: "shanhetu", name: "山河社稷图", slot: "artifact", rarity: "宝器", base: 140 },
+	{ tid: "donghuang", name: "东皇钟", slot: "artifact", rarity: "仙器", base: 200 },
+];
+
+// ==================== 坊市 ====================
+
+/** 坊市出售的四种丹药（价格 = cost/10 取整到十位、最低 50 灵石） */
+const SHOP_PILL_IDS: PillId[] = ["juqi", "huichun", "ningshen", "pojing"];
+const SHOP_PILLS: Pill[] = PILLS.filter((p) => SHOP_PILL_IDS.includes(p.id));
+
 const CULTIVATE_TEXTS = [
 	"你盘膝而坐，吐纳天地灵气...",
 	"灵气入体，经脉微微发热...",
@@ -356,6 +425,11 @@ function makeFreshPlayer(): PlayerState {
 		equipped: { core: "tuna", body: null, attack: null },
 		defeated: {},
 		cooldowns: {},
+		stones: 100,
+		equip: { weapon: null, armor: null, artifact: null },
+		bag: [],
+		towerFloor: 0,
+		lastSeen: Date.now(),
 		log: [],
 	};
 }
@@ -390,6 +464,13 @@ let battle = $state<BattleState | null>(null);
 let saveModalMode = $state<null | "export" | "import">(null);
 let importCode = $state("");
 let copyHint = $state("");
+
+// ---- 法宝强化弹窗 ----
+let enhanceId = $state<string | null>(null);
+let enhanceMsg = $state("");
+
+// ---- 闭关归来结算弹窗 ----
+let offlineReport = $state<{ duration: string; xp: number; stones: number } | null>(null);
 
 // ==================== 属性计算 ====================
 
@@ -458,17 +539,22 @@ const breathXp = $derived(
 
 // ---- 战斗属性：气血上限 / 攻击 / 防御 / 战力 ----
 
-/** 气血上限：境界 + 淬体丹 + 炼体功法 */
-const maxHp = $derived(100 + currentRealm.level * 60 + player.qutiUsed * 80 + (bodyManual?.hpBonus ?? 0));
-/** 攻击：境界 + 增元丹 + 真武体 + 攻伐功法 */
+/** 法宝三槽提供的属性加成（含强化等级） */
+const weaponBonus = $derived(player.equip.weapon ? equipValue(player.equip.weapon) : 0);
+const armorBonus = $derived(player.equip.armor ? equipValue(player.equip.armor) : 0);
+const artifactBonus = $derived(player.equip.artifact ? equipValue(player.equip.artifact) : 0);
+
+/** 气血上限：境界 + 淬体丹 + 炼体功法 + 法宝槽 */
+const maxHp = $derived(100 + currentRealm.level * 60 + player.qutiUsed * 80 + (bodyManual?.hpBonus ?? 0) + artifactBonus);
+/** 攻击：境界 + 增元丹 + 武器 + 攻伐功法，再乘真武体加成 */
 const atk = $derived(
 	Math.round(
-		(8 + currentRealm.level * 7 + player.zengyuanUsed * 8 + (attackManual?.atkBonus ?? 0)) *
+		(8 + currentRealm.level * 7 + player.zengyuanUsed * 8 + (attackManual?.atkBonus ?? 0) + weaponBonus) *
 			(currentPhysique?.atkMult ?? 1),
 	),
 );
-/** 防御：境界 + 炼体功法 */
-const def = $derived(4 + currentRealm.level * 4 + (bodyManual?.defBonus ?? 0));
+/** 防御：境界 + 炼体功法 + 护甲 */
+const def = $derived(4 + currentRealm.level * 4 + (bodyManual?.defBonus ?? 0) + armorBonus);
 /** 综合战力 */
 const battlePower = $derived(Math.round(maxHp * 0.5 + atk * 4 + def * 3));
 const hpPercent = $derived(Math.max(0, Math.round((player.hp / maxHp) * 100)));
@@ -479,7 +565,9 @@ const eventChance = $derived(0.28 + (currentCombo?.allEventBonus ?? 0));
  * 任意模态弹窗打开时，打坐周天完全暂停（不计息、不触发事件、不回血），
  * 避免雷劫/突破/斗法结算与后台事件互相干扰。
  */
-const meditationPaused = $derived(showThunderModal || showBreakthroughModal || battle !== null);
+const meditationPaused = $derived(
+	showThunderModal || showBreakthroughModal || battle !== null || enhanceId !== null || offlineReport !== null,
+);
 
 // ==================== 持久化 ====================
 
@@ -488,6 +576,7 @@ const LEGACY_KEYS = ["xiuxian_save_v4", "xiuxian_save_v3", "xiuxian_save_v2", "x
 
 function save() {
 	if (typeof localStorage !== "undefined") {
+		player.lastSeen = Date.now();
 		localStorage.setItem(STORAGE_KEY, JSON.stringify(player));
 	}
 }
@@ -507,6 +596,12 @@ function load() {
 				manuals: Array.isArray(data.manuals) && data.manuals.length > 0 ? data.manuals : ["tuna"],
 				equipped: { core: "tuna", body: null, attack: null, ...(data.equipped ?? {}) },
 				defeated: data.defeated ?? {},
+				// 旧档补发新系统默认值
+				stones: typeof data.stones === "number" ? data.stones : 100,
+				equip: { weapon: null, armor: null, artifact: null, ...(data.equip ?? {}) },
+				bag: Array.isArray(data.bag) ? data.bag : [],
+				towerFloor: typeof data.towerFloor === "number" ? data.towerFloor : 0,
+				lastSeen: typeof data.lastSeen === "number" ? data.lastSeen : Date.now(),
 			};
 			// 突破后可能出现气血超上限（理论不会），兜底修正
 			player.hp = Math.min(player.hp, maxHp);
@@ -575,6 +670,192 @@ function damageHp(amount: number) {
 function healHp(amount: number) {
 	player.hp = Math.min(maxHp, player.hp + Math.round(amount));
 }
+
+// ==================== 法宝装备 ====================
+
+/** 法宝当前实际加成值：base × (1 + 10%×强化等级)，向下取整 */
+function equipValueAt(base: number, enhance: number): number {
+	return Math.floor(base * (1 + 0.1 * enhance));
+}
+function equipValue(item: EquipItem): number {
+	return equipValueAt(item.base, item.enhance);
+}
+
+/** 法宝效果文案：武器加攻 / 护甲加防 / 法宝加气血上限 */
+function equipEffectText(item: EquipItem): string {
+	const key = item.slot === "weapon" ? "攻击" : item.slot === "armor" ? "防御" : "气血上限";
+	return `${key} +${equipValue(item)}`;
+}
+
+/** 随机掉落一件法宝；minRarityIdx 保底品质，upgradeTier 品质升一档（斗法强敌） */
+function rollEquipDrop(minRarityIdx = 0, upgradeTier = false): EquipItem {
+	let r = 0;
+	let roll = Math.random() * 100;
+	for (let i = 0; i < EQUIP_DROP_WEIGHTS.length; i++) {
+		roll -= EQUIP_DROP_WEIGHTS[i];
+		if (roll <= 0) {
+			r = i;
+			break;
+		}
+	}
+	if (upgradeTier) r = Math.min(EQUIP_RARITIES.length - 1, r + 1);
+	r = Math.max(r, minRarityIdx);
+	const rarity = EQUIP_RARITIES[r];
+	const pool = EQUIP_POOL.filter((e) => e.rarity === rarity);
+	const tpl = pool[Math.floor(Math.random() * pool.length)];
+	return {
+		id: `${tpl.tid}_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6).toString(36)}`,
+		name: tpl.name,
+		slot: tpl.slot,
+		rarity: tpl.rarity,
+		base: tpl.base,
+		enhance: 0,
+	};
+}
+
+/** 法宝入囊：行囊满则按 base×5 折算灵石。返回是否入囊 */
+function gainEquip(item: EquipItem): boolean {
+	if (player.bag.length >= BAG_CAP) {
+		const worth = item.base * 5;
+		player.stones += worth;
+		addLog(`行囊已满，「${item.name}」折算为 ${worth} 灵石。`, "warning");
+		return false;
+	}
+	player.bag.push(item);
+	return true;
+}
+
+/** 从行囊装备上身；原槽位法宝回囊 */
+function wearEquip(item: EquipItem) {
+	const idx = player.bag.findIndex((i) => i.id === item.id);
+	if (idx < 0) return;
+	player.bag.splice(idx, 1);
+	const cur = player.equip[item.slot];
+	if (cur) player.bag.push(cur);
+	player.equip[item.slot] = item;
+	// 卸下/更换气血法宝后上限可能下降，兜底修正
+	player.hp = Math.min(player.hp, maxHp);
+	addLog(`你祭起「${item.name}」（${item.rarity} · ${equipEffectText(item)}）。`, "success");
+	save();
+}
+
+/** 卸下某槽位法宝回行囊 */
+function unwearEquip(slot: EquipSlot) {
+	const cur = player.equip[slot];
+	if (!cur) return;
+	if (player.bag.length >= BAG_CAP) {
+		addLog("行囊已满，无法卸下法宝。", "warning");
+		return;
+	}
+	player.equip[slot] = null;
+	player.bag.push(cur);
+	player.hp = Math.min(player.hp, maxHp);
+	save();
+}
+
+/** 强化费用与成功率（失败不掉级不损毁，上限 +9） */
+function enhanceCostOf(item: EquipItem): number {
+	return 50 * (item.enhance + 1);
+}
+function enhanceRateOf(item: EquipItem): number {
+	return Math.max(0.5, 1 - 0.06 * item.enhance);
+}
+
+/** 强化弹窗目标：按 id 从行囊/装备槽实时取，保证强化后界面同步 */
+const enhanceItem = $derived.by((): EquipItem | null => {
+	if (!enhanceId) return null;
+	const inBag = player.bag.find((i) => i.id === enhanceId);
+	if (inBag) return inBag;
+	for (const { slot } of EQUIP_SLOTS) {
+		const it = player.equip[slot];
+		if (it && it.id === enhanceId) return it;
+	}
+	return null;
+});
+
+function openEnhance(item: EquipItem) {
+	enhanceId = item.id;
+	enhanceMsg = "";
+}
+function closeEnhance() {
+	enhanceId = null;
+	enhanceMsg = "";
+}
+
+function doEnhance() {
+	const item = enhanceItem;
+	if (!item || item.enhance >= 9) return;
+	const cost = enhanceCostOf(item);
+	if (player.stones < cost) return;
+	player.stones -= cost;
+	const rate = enhanceRateOf(item);
+	if (Math.random() < rate) {
+		item.enhance += 1;
+		enhanceMsg = `强化成功！「${item.name}」升至 +${item.enhance}（${equipEffectText(item)}）。`;
+		addLog(`「${item.name}」强化成功（+${item.enhance}），${equipEffectText(item)}。`, "success");
+	} else {
+		enhanceMsg = "强化失败，法宝灵光一暗，所幸并无损毁。";
+		addLog(`「${item.name}」强化失败，${cost} 灵石打了水漂。`, "warning");
+	}
+	save();
+}
+
+// ==================== 坊市 ====================
+
+/** 坊市售价：cost/10 取整到十位、最低 50 灵石 */
+function shopPrice(pill: Pill): number {
+	return Math.max(50, Math.round(pill.cost / 100) * 10);
+}
+
+function buyShopPill(pill: Pill) {
+	const price = shopPrice(pill);
+	if (player.stones < price) return;
+	player.stones -= price;
+	player.pills[pill.id] += 1;
+	addLog(`你在坊市以 ${price} 灵石购得一颗「${pill.name}」。`, "success");
+	save();
+}
+
+// ==================== 离线闭关 ====================
+
+function formatOfflineDuration(ms: number): string {
+	const totalMin = Math.floor(ms / 60000);
+	const h = Math.floor(totalMin / 60);
+	const m = totalMin % 60;
+	return h > 0 ? `${h} 小时 ${m} 分钟` : `${Math.max(1, m)} 分钟`;
+}
+
+/**
+ * 离线闭关结算：超过 120 秒未在线才结算，封顶 12 小时；
+ * 修为 = 在线打坐每分钟修为（基础速率，不含丹药 buff、不触发事件）× 50%，
+ * 灵石按打坐产出同比例折算；出关气血回满。
+ */
+function settleOffline() {
+	if (needCreation) {
+		player.lastSeen = Date.now();
+		return;
+	}
+	const now = Date.now();
+	const elapsed = now - (player.lastSeen ?? now);
+	if (elapsed < 120_000) {
+		player.lastSeen = now;
+		return;
+	}
+	const capped = Math.min(elapsed, 12 * 3600_000);
+	const minutes = capped / 60000;
+	// 在线速率：每息 breathXp、每 2 秒一息 → 每分钟 30 息；离线取 50%
+	const xpGain = Math.round(breathXp * 30 * 0.5 * minutes);
+	// 在线灵石：每 60 息（2 分钟）产出 (5+境界×3) → 每分钟一半；离线再取 50%
+	const stoneGain = Math.floor(((5 + player.realmIndex * 3) / 4) * minutes);
+	player.xp += xpGain;
+	player.stones += stoneGain;
+	player.hp = maxHp;
+	offlineReport = { duration: formatOfflineDuration(elapsed), xp: xpGain, stones: stoneGain };
+	addLog(`闭关 ${offlineReport.duration}，出关获 ${xpGain} 修为、${stoneGain} 灵石，气血充盈。`, "success");
+	save();
+}
+
+onMount(() => settleOffline());
 
 // ==================== 创角三转盘 ====================
 
@@ -747,16 +1028,26 @@ function rollRandomEvent(base: number): EventResult {
 		weight: 12 * ff,
 		run: () => {
 			const delta = base * 15;
+			// 遗府灵石机缘 +100~300
+			const stones = 100 + Math.floor(Math.random() * 201);
+			player.stones += stones;
+			let extra = `灵石 +${stones}`;
+			// 10% 概率拾得一件法宝
+			if (Math.random() < 0.1) {
+				const item = rollEquipDrop();
+				gainEquip(item);
+				extra += `，另拾得法宝「${item.name}」`;
+			}
 			// 12% 概率在遗府深处发现上古剑修遗刻（唯一的《诛仙剑诀》产出途径）
 			if (!player.manuals.includes("zhuxian") && Math.random() < 0.12) {
 				grantManual("zhuxian");
-				addLog(`遗府深处供着一卷上古剑修遗刻，修为另 +${delta}！`, "success");
+				addLog(`遗府深处供着一卷上古剑修遗刻，修为另 +${delta}，${extra}！`, "success");
 			} else {
 				const gotPill = Math.random() < 0.35 && grantRandomPill();
 				addLog(
 					gotPill
-						? `你误入一座古修遗府，搜得灵石丹药，修为 +${delta}！`
-						: `你误入一座古修遗府，将府中残余灵气尽数炼化，修为 +${delta}！`,
+						? `你误入一座古修遗府，搜得灵石丹药，修为 +${delta}，${extra}！`
+						: `你误入一座古修遗府，将府中残余灵气尽数炼化，修为 +${delta}，${extra}！`,
 					"success",
 				);
 			}
@@ -969,6 +1260,10 @@ function breathTick() {
 
 	player.xp = Math.max(0, player.xp + xpGain);
 	player.totalBreaths += 1;
+	// 每 60 息凝练一批灵石（打坐的灵石产出）
+	if (player.totalBreaths % 60 === 0) {
+		player.stones += 5 + player.realmIndex * 3;
+	}
 	lastGain = xpGain;
 	save();
 }
@@ -1012,7 +1307,14 @@ function portal(node: HTMLElement) {
 
 // 任意弹窗打开时锁定背景滚动，关闭后恢复
 $effect(() => {
-	if (showThunderModal || showBreakthroughModal || battle !== null || saveModalMode !== null) {
+	if (
+		showThunderModal ||
+		showBreakthroughModal ||
+		battle !== null ||
+		saveModalMode !== null ||
+		enhanceId !== null ||
+		offlineReport !== null
+	) {
 		const prev = document.body.style.overflow;
 		document.body.style.overflow = "hidden";
 		return () => {
@@ -1159,6 +1461,8 @@ function startBattle(tpl: EnemyTemplate, index: number) {
 	const enemy = getEnemy(tpl);
 	battle = {
 		tplId: tpl.id,
+		source: "arena",
+		towerN: 0,
 		enemyName: tpl.name,
 		enemyTitle: tpl.title,
 		ehp: enemy.hp,
@@ -1173,6 +1477,8 @@ function startBattle(tpl: EnemyTemplate, index: number) {
 		firstClear: false,
 		manualName: null,
 		pillName: null,
+		stoneGain: 0,
+		equipName: null,
 	};
 	battlePushLog(`你登台对阵「${tpl.name}」（战力 ${enemy.power}），战斗开始！`, "warning");
 }
@@ -1185,7 +1491,8 @@ function enemyStrikeBack(): boolean {
 	player.hp = Math.max(0, player.hp - dmg);
 	battlePushLog(`「${b.enemyName}」反扑，你失去 ${dmg} 点气血。`, "danger");
 	if (player.hp <= 0) {
-		finishBattleLose();
+		if (b.source === "tower") finishTowerLose();
+		else finishBattleLose();
 		return true;
 	}
 	b.rounds += 1;
@@ -1195,13 +1502,17 @@ function enemyStrikeBack(): boolean {
 /** 玩家操作：出手攻击 */
 function battleAttack() {
 	const b = battle;
-	const tpl = b ? ENEMY_TEMPLATES.find((t) => t.id === b.tplId) : undefined;
-	if (!b || !tpl || b.status !== "fighting") return;
+	if (!b || b.status !== "fighting") return;
 	const dmg = rollMyDamage(b.edef);
 	b.ehp = Math.max(0, b.ehp - dmg);
 	battlePushLog(`第 ${b.rounds} 合 · 你运剑猛攻，对「${b.enemyName}」造成 ${dmg} 点伤害。`);
 	if (b.ehp <= 0) {
-		finishBattleWin(tpl);
+		if (b.source === "tower") {
+			finishTowerWin();
+		} else {
+			const tpl = ENEMY_TEMPLATES.find((t) => t.id === b.tplId);
+			if (tpl) finishBattleWin(tpl);
+		}
 		return;
 	}
 	enemyStrikeBack();
@@ -1233,10 +1544,11 @@ function battleRetreat() {
 	save();
 }
 
-/** 胜利结算：基础修为 + 首通双倍 + 35% 掉丹 + 首通固定掉落功法 */
+/** 胜利结算：基础修为 + 首通双倍 + 灵石 + 35% 掉丹 + 15% 掉法宝 + 首通固定掉落功法 */
 function finishBattleWin(tpl: EnemyTemplate) {
 	const b = battle;
 	if (!b) return;
+	const idx = ENEMY_TEMPLATES.findIndex((t) => t.id === tpl.id);
 	const enemy = getEnemy(tpl);
 	const base = Math.round(enemy.power * tpl.rewardFactor * 0.6);
 	const first = !player.defeated[tpl.id];
@@ -1249,12 +1561,24 @@ function finishBattleWin(tpl: EnemyTemplate) {
 	player.battlesWon += 1;
 	player.cooldowns[tpl.id] = BATTLE_COOLDOWN;
 
+	// 灵石赏金：50×(对手序号+1)，首通翻倍
+	const stoneGain = 50 * (idx + 1) * (first ? 2 : 1);
+	player.stones += stoneGain;
+	b.stoneGain = stoneGain;
+
 	// 35% 概率额外掉一颗当前境界可炼的丹药
 	const pool = availablePills();
 	if (Math.random() < 0.35 && pool.length > 0) {
 		const pill = pool[Math.floor(Math.random() * pool.length)];
 		player.pills[pill.id] += 1;
 		b.pillName = pill.name;
+	}
+
+	// 15% 概率掉法宝；对手序号 ≥4 时掉落品质升一档
+	if (Math.random() < 0.15) {
+		const item = rollEquipDrop(0, idx >= 4);
+		b.equipName = item.name;
+		gainEquip(item);
 	}
 
 	// 首通掉落固定秘籍（grantManual 内部会写日志并自动装备空槽）
@@ -1268,10 +1592,13 @@ function finishBattleWin(tpl: EnemyTemplate) {
 	b.status = "win";
 	b.reward = total;
 	b.firstClear = first;
-	battlePushLog(`「${tpl.name}」被你斩于台下！获得 ${total} 修为${first ? "（首通双倍）" : ""}。`, "success");
+	battlePushLog(
+		`「${tpl.name}」被你斩于台下！获得 ${total} 修为、${stoneGain} 灵石${first ? "（首通双倍）" : ""}。`,
+		"success",
+	);
 	addLog(
-		`斗法台 · 你 ${b.rounds} 合击败「${tpl.name}」（战力 ${enemy.power}），获 ${total} 修为` +
-			`${b.pillName ? `与一颗${b.pillName}` : ""}${first ? "，并解锁下一名对手" : ""}！`,
+		`斗法台 · 你 ${b.rounds} 合击败「${tpl.name}」（战力 ${enemy.power}），获 ${total} 修为、${stoneGain} 灵石` +
+			`${b.pillName ? `与一颗${b.pillName}` : ""}${b.equipName ? `，拾得法宝「${b.equipName}」` : ""}${first ? "，并解锁下一名对手" : ""}！`,
 		"success",
 	);
 	save();
@@ -1294,6 +1621,96 @@ function finishBattleLose() {
 
 function closeBattle() {
 	battle = null;
+}
+
+// ==================== 无尽试炼塔 ====================
+
+/** 试炼塔解锁条件：斗法台六名对手全部首通 */
+const towerUnlocked = $derived(ENEMY_TEMPLATES.every((t) => player.defeated[t.id]));
+
+/** 生成第 floor 层守将：以斗法台最强者为基底，属性 ×(1 + 0.18×(层数-1)) */
+function towerEnemyStats(floor: number): EnemyStats {
+	const tpl = ENEMY_TEMPLATES[ENEMY_TEMPLATES.length - 1];
+	const base = getEnemy(tpl);
+	const mult = 1 + 0.18 * (floor - 1);
+	const hp = Math.round(base.hp * mult);
+	const eatk = Math.round(base.atk * mult);
+	const edef = Math.round(base.def * mult);
+	return { tpl, level: base.level, hp, atk: eatk, def: edef, power: Math.round(hp * 0.5 + eatk * 4 + edef * 3) };
+}
+
+/** 挑战第 N 层：复用交互式回合战斗弹窗，敌人来源标记为 tower */
+function startTowerBattle() {
+	if (battle || !towerUnlocked) return;
+	if ((player.cooldowns["tower"] ?? 0) > 0) return;
+	if (player.hp < maxHp * MIN_HP_RATIO) {
+		addLog("你气血不足三成，不宜登塔，先打坐疗伤或服回春丹吧。", "warning");
+		return;
+	}
+	const n = player.towerFloor + 1;
+	const e = towerEnemyStats(n);
+	battle = {
+		tplId: "tower",
+		source: "tower",
+		towerN: n,
+		enemyName: `试炼守将 · 第 ${n} 层`,
+		enemyTitle: "无尽试炼",
+		ehp: e.hp,
+		ehpMax: e.hp,
+		eatk: e.atk,
+		edef: e.def,
+		epower: e.power,
+		rounds: 1,
+		logs: [],
+		status: "fighting",
+		reward: 0,
+		firstClear: false,
+		manualName: null,
+		pillName: null,
+		stoneGain: 0,
+		equipName: null,
+	};
+	battlePushLog(`你踏入试炼塔第 ${n} 层，守将现身（战力 ${e.power}）！`, "warning");
+}
+
+/** 试炼胜利：层数+1、灵石 40+15×N、小额修为；每 5 层保底掉法宝（至少灵品）；冷却复用 tower 键 */
+function finishTowerWin() {
+	const b = battle;
+	if (!b) return;
+	const n = b.towerN;
+	player.towerFloor = Math.max(player.towerFloor, n);
+	player.battlesWon += 1;
+	player.cooldowns["tower"] = BATTLE_COOLDOWN;
+	const stoneGain = 40 + 15 * n;
+	player.stones += stoneGain;
+	const xpGain = Math.round(b.epower * 0.4);
+	player.xp += xpGain;
+	b.stoneGain = stoneGain;
+	b.reward = xpGain;
+	if (n % 5 === 0) {
+		const item = rollEquipDrop(1, false); // 保底灵品
+		b.equipName = item.name;
+		gainEquip(item);
+	}
+	b.status = "win";
+	battlePushLog(`试炼守将·第 ${n} 层被击破！获 ${xpGain} 修为、${stoneGain} 灵石。`, "success");
+	addLog(
+		`试炼塔 · 你 ${b.rounds} 合攻破第 ${n} 层，获 ${xpGain} 修为、${stoneGain} 灵石${b.equipName ? `，拾得法宝「${b.equipName}」` : ""}！`,
+		"success",
+	);
+	save();
+}
+
+/** 试炼失败：无惩罚，气血见底但修为无损，可随时重试 */
+function finishTowerLose() {
+	const b = battle;
+	if (!b) return;
+	player.battlesLost += 1;
+	b.status = "lose";
+	b.reward = 0;
+	battlePushLog("你不敌试炼守将，被传送出塔。试炼并无折损，疗伤后可再战。", "danger");
+	addLog(`试炼塔 · 你止步第 ${b.towerN} 层，所幸并无折损。`, "warning");
+	save();
 }
 
 // ==================== 存档导出 / 导入 ====================
@@ -1344,6 +1761,12 @@ function doImport() {
 		manuals: Array.isArray(data.manuals) && data.manuals.length > 0 ? data.manuals : ["tuna"],
 		equipped: { core: "tuna", body: null, attack: null, ...(data.equipped ?? {}) },
 		defeated: data.defeated ?? {},
+		// 旧存档码补发新系统默认值（缺 lastSeen 时记为现在，避免误触发离线结算）
+		stones: typeof data.stones === "number" ? data.stones : 100,
+		equip: { weapon: null, armor: null, artifact: null, ...(data.equip ?? {}) },
+		bag: Array.isArray(data.bag) ? data.bag : [],
+		towerFloor: typeof data.towerFloor === "number" ? data.towerFloor : 0,
+		lastSeen: typeof data.lastSeen === "number" ? data.lastSeen : Date.now(),
 		log: Array.isArray(data.log) ? data.log : [],
 	};
 	// 气血兜底：炼体功法/淬体丹变化后可能超上限
@@ -1351,6 +1774,8 @@ function doImport() {
 	save();
 	addLog("存档导入成功，道途接续。", "success");
 	saveModalMode = null;
+	// 导入成功后同样执行一次离线闭关结算
+	settleOffline();
 }
 
 // ==================== 突破与雷劫 ====================
@@ -1590,6 +2015,7 @@ function closeModal() {
 				<div class="xp-text">
 					<span>修为: {player.xp.toLocaleString()}</span>
 					{#if nextRealm}<span>/ {nextRealm.requiredXp.toLocaleString()}</span>{:else}<span>（已臻化境）</span>{/if}
+					<span class="stone-text">灵石 {player.stones.toLocaleString()}</span>
 				</div>
 			</div>
 
@@ -1609,6 +2035,22 @@ function closeModal() {
 					<div class="stat-cell"><span class="stat-num">{def}</span><span class="stat-key">防御</span></div>
 					<div class="stat-cell stat-power"><span class="stat-num">{battlePower.toLocaleString()}</span><span class="stat-key">战力</span></div>
 				</div>
+			</div>
+
+			<!-- 法宝三槽速览 -->
+			<div class="equip-strip">
+				{#each EQUIP_SLOTS as es (es.slot)}
+					{@const item = player.equip[es.slot]}
+					<div class="equip-slot">
+						<span class="equip-slot-label">{es.label}</span>
+						{#if item}
+							<span class="equip-slot-name" style={`color: ${EQUIP_RARITY_COLORS[item.rarity]}`}>{item.name}{item.enhance > 0 ? ` +${item.enhance}` : ""}</span>
+							<span class="equip-slot-effect">{equipEffectText(item)}</span>
+						{:else}
+							<span class="equip-slot-empty">虚位以待</span>
+						{/if}
+					</div>
+				{/each}
 			</div>
 
 			<!-- 打坐面板 -->
@@ -1704,10 +2146,86 @@ function closeModal() {
 				</div>
 			{/each}
 		</div>
+
+		<!-- 无尽试炼塔入口 -->
+		<div class="tower-entry">
+			{#if !towerUnlocked}
+				<div class="tower-locked">
+					<h4 class="tower-title">无尽试炼塔</h4>
+					<span class="tower-desc">通关斗法台后开启</span>
+				</div>
+			{:else}
+				{@const nextFloor = player.towerFloor + 1}
+				{@const towerCd = player.cooldowns["tower"] ?? 0}
+				<div class="tower-open">
+					<div class="tower-info">
+						<h4 class="tower-title">无尽试炼塔 · 已通关 {player.towerFloor} 层</h4>
+						<span class="tower-desc">
+							下一层「试炼守将·第 {nextFloor} 层」· 胜利得 {Math.round(towerEnemyStats(nextFloor).power * 0.4)} 修为 + {40 + 15 * nextFloor} 灵石{nextFloor % 5 === 0 ? " · 保底法宝" : ""}
+							{#if towerCd > 0} · 冷却 {towerCd} 息{/if}
+						</span>
+					</div>
+					<button
+						class="btn arena-btn"
+						disabled={towerCd > 0 || player.hp < maxHp * MIN_HP_RATIO}
+						onclick={startTowerBattle}
+					>
+						{towerCd > 0 ? "休整中" : `挑战第 ${nextFloor} 层`}
+					</button>
+				</div>
+			{/if}
+		</div>
 	</div>
 
-	<!-- ========== 功法典籍 ========== -->
-	<div class="manual-card">
+	<!-- ========== 装备管理 ========== -->
+		<div class="equip-card">
+			<div class="pill-header">
+				<h3 class="pill-title">法宝装备</h3>
+				<span class="pill-subtitle">三槽加身 · 行囊 {player.bag.length}/{BAG_CAP} · 点击强化可提升 +10% 属性</span>
+			</div>
+			<div class="equip-body">
+				<div class="equip-slots">
+					{#each EQUIP_SLOTS as es (es.slot)}
+						{@const item = player.equip[es.slot]}
+						<div class="equip-detail-slot">
+							<div class="equip-detail-label">{es.label}</div>
+							{#if item}
+								<div class="equip-detail-info">
+									<span class="equip-detail-name" style={`color: ${EQUIP_RARITY_COLORS[item.rarity]}`}>{item.name}{item.enhance > 0 ? ` +${item.enhance}` : ""}</span>
+									<span class="equip-detail-effect">{equipEffectText(item)}</span>
+								</div>
+								<div class="equip-detail-actions">
+									<button class="btn equip-mini" onclick={() => openEnhance(item)}>强化</button>
+									<button class="btn btn-ghost equip-mini" onclick={() => unwearEquip(es.slot)}>卸下</button>
+								</div>
+							{:else}
+								<div class="equip-detail-empty">未装备</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+				<div class="bag-list">
+					<h4 class="bag-title">行囊</h4>
+					{#each player.bag as item (item.id)}
+						<div class="bag-item">
+							<div class="bag-item-info">
+								<span class="bag-name" style={`color: ${EQUIP_RARITY_COLORS[item.rarity]}`}>{item.name}{item.enhance > 0 ? ` +${item.enhance}` : ""}</span>
+								<span class="bag-meta">{EQUIP_SLOTS.find((s) => s.slot === item.slot)?.label} · {equipEffectText(item)}</span>
+							</div>
+							<div class="bag-actions">
+								<button class="btn equip-mini" onclick={() => openEnhance(item)}>强化</button>
+								<button class="btn equip-mini" onclick={() => wearEquip(item)}>装备</button>
+							</div>
+						</div>
+					{:else}
+						<p class="bag-empty">行囊空空如也。斗法、遗府或试炼塔有机会获得法宝。</p>
+					{/each}
+				</div>
+			</div>
+		</div>
+
+		<!-- ========== 功法典籍 ========== -->
+		<div class="manual-card">
 		<div class="pill-header">
 			<h3 class="pill-title">功法典籍</h3>
 			<span class="pill-subtitle">三槽各修一本 · 被动即时生效 · 斗法首通有秘籍掉落</span>
@@ -1766,6 +2284,32 @@ function closeModal() {
 							<button class="btn pill-use" disabled={player.pills[pill.id] <= 0} onclick={() => usePill(pill)}>服用</button>
 							<button class="btn pill-buy" disabled={locked || player.xp < pill.cost} onclick={() => buyPill(pill)}>
 								炼制 {pill.cost}
+							</button>
+						</div>
+					</div>
+				{/each}
+			</div>
+		</div>
+
+		<!-- ========== 坊市商店 ========== -->
+		<div class="pill-card">
+			<div class="pill-header">
+				<h3 class="pill-title">坊市</h3>
+				<span class="pill-subtitle">灵石交易 · 当前灵石 {player.stones.toLocaleString()}</span>
+			</div>
+			<div class="pill-list">
+				{#each SHOP_PILLS as pill (pill.id)}
+					{@const price = shopPrice(pill)}
+					{@const afford = player.stones >= price}
+					<div class="pill-item" class:pill-locked={!afford}>
+						<span class="pill-orb" style={`background: radial-gradient(circle at 35% 30%, ${pill.color}, ${pill.color}88)`}></span>
+						<div class="pill-info">
+							<div class="pill-name">{pill.name} <span class="pill-count">×{player.pills[pill.id]}</span></div>
+							<div class="pill-desc">{pill.desc}</div>
+						</div>
+						<div class="pill-actions">
+							<button class="btn pill-buy" disabled={!afford} onclick={() => buyShopPill(pill)}>
+								购买 {price} 灵石
 							</button>
 						</div>
 					</div>
@@ -1917,16 +2461,21 @@ function closeModal() {
 					<div class="battle-result result-win">
 						<div class="icon">胜</div>
 						<p>
-							{battle.firstClear ? "首通大捷！" : "斗法获胜！"} 获得 <strong>{battle.reward.toLocaleString()}</strong> 修为
-							{battle.pillName ? `，另缴获一颗${battle.pillName}` : ""}
-							{battle.manualName ? `，夺得失传秘籍《${battle.manualName}》` : ""}
+							{battle.source === "tower"
+								? `攻破第 ${battle.towerN} 层！获得 ${battle.reward.toLocaleString()} 修为、${battle.stoneGain.toLocaleString()} 灵石`
+								: `${battle.firstClear ? "首通大捷！" : "斗法获胜！"} 获得 ${battle.reward.toLocaleString()} 修为、${battle.stoneGain.toLocaleString()} 灵石${battle.pillName ? `，另缴获一颗${battle.pillName}` : ""}${battle.manualName ? `，夺得失传秘籍《${battle.manualName}》` : ""}`}
+							{battle.equipName ? `，拾得法宝「${battle.equipName}」` : ""}
 						</p>
 						<button class="btn" onclick={closeBattle}>收下战果</button>
 					</div>
 				{:else if battle.status === "lose"}
 					<div class="battle-result result-lose">
 						<div class="icon">败</div>
-						<p>力竭败退，损失 <strong>{battle.reward.toLocaleString()}</strong> 修为，气血见底。回打坐或回春丹疗伤后再战。</p>
+						<p>
+							{battle.source === "tower"
+								? "试炼失败，并无折损，气血见底。疗伤后可随时再试。"
+								: `力竭败退，损失 ${battle.reward.toLocaleString()} 修为，气血见底。回打坐或回春丹疗伤后再战。`}
+						</p>
 						<button class="btn" onclick={closeBattle}>黯然下台</button>
 					</div>
 				{:else}
@@ -1936,6 +2485,60 @@ function closeModal() {
 						<button class="btn" onclick={closeBattle}>返回</button>
 					</div>
 				{/if}
+			</div>
+		</div>
+	{/if}
+
+	<!-- ========== 法宝强化弹窗 ========== -->
+	{#if enhanceId && enhanceItem}
+		{@const item = enhanceItem}
+		<div class="modal-overlay" use:portal onclick={closeEnhance}>
+			<div class="modal-content enhance-modal" onclick={(e) => e.stopPropagation()}>
+				<h3>法宝强化 · {item.name}</h3>
+				<p class="enhance-desc">
+					当前强化 +{item.enhance} · {equipEffectText(item)}
+					{#if item.enhance < 9}
+						<br />升至 +{item.enhance + 1} 需 <strong>{enhanceCostOf(item)}</strong> 灵石
+						<br />成功率 <strong>{(enhanceRateOf(item) * 100).toFixed(0)}%</strong>
+					{:else}
+						<br />已达最高强化 +9
+					{/if}
+				</p>
+				{#if enhanceMsg}
+					<p class="enhance-msg">{enhanceMsg}</p>
+				{/if}
+				<div class="enhance-actions">
+					{#if item.enhance < 9}
+						<button class="btn" disabled={player.stones < enhanceCostOf(item)} onclick={doEnhance}>
+							消耗 {enhanceCostOf(item)} 灵石 强化
+						</button>
+					{/if}
+					<button class="btn btn-ghost" onclick={closeEnhance}>关闭</button>
+				</div>
+			</div>
+		</div>
+	{/if}
+
+	<!-- ========== 闭关归来弹窗 ========== -->
+	{#if offlineReport}
+		<div class="modal-overlay" use:portal onclick={() => (offlineReport = null)}>
+			<div class="modal-content offline-modal" onclick={(e) => e.stopPropagation()}>
+				<h3 class="offline-title">闭关归来</h3>
+				<p class="offline-desc">
+					离线时长：<strong>{offlineReport.duration}</strong>
+				</p>
+				<div class="offline-rewards">
+					<div class="offline-reward">
+						<span class="offline-key">获得修为</span>
+						<span class="offline-val">+{offlineReport.xp.toLocaleString()}</span>
+					</div>
+					<div class="offline-reward">
+						<span class="offline-key">获得灵石</span>
+						<span class="offline-val">+{offlineReport.stones.toLocaleString()}</span>
+					</div>
+				</div>
+				<p class="offline-tip">闭关期间气血已回满，可继续修炼。</p>
+				<button class="btn" onclick={() => (offlineReport = null)}>继续修炼</button>
 			</div>
 		</div>
 	{/if}
@@ -2006,6 +2609,79 @@ function closeModal() {
 .xp-fill.glowing { animation: xpGlow 2s ease-in-out infinite; }
 @keyframes xpGlow { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.35); } }
 .xp-text { display: flex; gap: 0.35rem; font-size: 0.85rem; color: var(--content-meta, #9ca3af); margin-top: 0.4rem; }
+.stone-text { margin-left: auto; color: #fbbf24; }
+
+/* ===== 法宝装备 ===== */
+.equip-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; margin-top: 0.8rem; }
+.equip-slot {
+	padding: 0.5rem 0.6rem; border-radius: 0.6rem; background: rgba(128, 128, 128, 0.08);
+	display: flex; flex-direction: column; gap: 0.15rem; text-align: center;
+}
+.equip-slot-label { font-size: 0.68rem; color: var(--content-meta, #9ca3af); }
+.equip-slot-name { font-size: 0.82rem; font-weight: 700; }
+.equip-slot-effect { font-size: 0.7rem; color: var(--content-meta, #9ca3af); }
+.equip-slot-empty { font-size: 0.82rem; color: var(--content-meta, #9ca3af); }
+
+.equip-card {
+	background: var(--card-bg, rgba(255, 255, 255, 0.03));
+	border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.15));
+	border-radius: 1rem;
+	padding: 1.15rem 1.25rem;
+	display: flex; flex-direction: column; gap: 0.85rem;
+}
+.equip-body { display: flex; flex-direction: column; gap: 0.85rem; }
+.equip-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+.equip-detail-slot {
+	display: flex; flex-direction: column; gap: 0.35rem; align-items: center;
+	padding: 0.6rem 0.4rem; border-radius: 0.75rem; background: rgba(128, 128, 128, 0.06);
+	border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.12));
+}
+.equip-detail-label { font-size: 0.72rem; color: var(--content-meta, #9ca3af); }
+.equip-detail-info { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; }
+.equip-detail-name { font-size: 0.88rem; font-weight: 700; }
+.equip-detail-effect { font-size: 0.7rem; color: var(--content-meta, #9ca3af); }
+.equip-detail-actions { display: flex; gap: 0.35rem; }
+.equip-mini { padding: 0.25rem 0.55rem; font-size: 0.72rem; }
+.equip-detail-empty { font-size: 0.8rem; color: var(--content-meta, #9ca3af); }
+
+.bag-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.bag-title { font-size: 0.85rem; font-weight: 700; margin: 0; }
+.bag-item {
+	display: flex; align-items: center; gap: 0.7rem;
+	padding: 0.5rem 0.7rem; border-radius: 0.6rem; background: rgba(128, 128, 128, 0.06);
+}
+.bag-item-info { flex: 1; min-width: 0; }
+.bag-name { font-weight: 600; font-size: 0.88rem; display: block; }
+.bag-meta { font-size: 0.72rem; color: var(--content-meta, #9ca3af); }
+.bag-actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
+.bag-empty { font-size: 0.8rem; color: var(--content-meta, #9ca3af); margin: 0; }
+
+/* ===== 试炼塔入口 ===== */
+.tower-entry { margin-top: 0.9rem; }
+.tower-locked, .tower-open {
+	padding: 0.75rem; border-radius: 0.75rem; background: rgba(128, 128, 128, 0.06);
+	display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+}
+.tower-title { font-size: 0.95rem; font-weight: 700; margin: 0; }
+.tower-desc { font-size: 0.78rem; color: var(--content-meta, #9ca3af); flex: 1; min-width: 0; }
+.tower-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+
+/* ===== 法宝强化 / 闭关归来弹窗补充 ===== */
+.enhance-modal { max-width: 24rem; }
+.enhance-desc { font-size: 0.88rem; line-height: 1.6; margin: 0.5rem 0 0.75rem; }
+.enhance-msg { font-size: 0.85rem; color: #fbbf24; margin: 0 0 1rem; }
+.enhance-actions { display: flex; gap: 0.6rem; justify-content: center; }
+.offline-modal { max-width: 24rem; }
+.offline-title { margin: 0 0 0.5rem; color: #fbbf24; }
+.offline-desc { font-size: 0.9rem; margin: 0 0 1rem; }
+.offline-rewards { display: flex; gap: 0.75rem; justify-content: center; margin-bottom: 1rem; }
+.offline-reward {
+	padding: 0.5rem 0.85rem; border-radius: 0.6rem; background: rgba(128, 128, 128, 0.08);
+	display: flex; flex-direction: column; gap: 0.1rem; min-width: 6.5rem;
+}
+.offline-key { font-size: 0.7rem; color: var(--content-meta, #9ca3af); }
+.offline-val { font-size: 1.1rem; font-weight: 800; color: #4ade80; }
+.offline-tip { font-size: 0.78rem; color: var(--content-meta, #9ca3af); margin: 0 0 1rem; }
 
 /* ===== 战力面板（宽屏气血条与攻防横向并排，压缩纵向高度）===== */
 .power-panel {
