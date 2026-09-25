@@ -88,6 +88,44 @@ interface EnemyStats {
 	power: number;
 }
 
+/** 功法槽位：core 主修心法 / body 炼体 / attack 攻伐 */
+type ManualSlot = "core" | "body" | "attack";
+
+interface Manual {
+	id: string;
+	name: string;
+	slot: ManualSlot;
+	rarity: "凡品" | "灵品" | "宝品" | "天品";
+	color: string;
+	desc: string;
+	xpMult?: number; // 主修：打坐收益倍率
+	breakBonus?: number; // 主修：突破成功率加成
+	hpBonus?: number; // 炼体：气血上限
+	defBonus?: number; // 炼体：防御
+	atkBonus?: number; // 攻伐：攻击
+	dmgMult?: number; // 攻伐：造成伤害倍率
+	hint: string; // 未获得时展示的获取线索
+}
+
+/** 交互式斗法的运行时状态 */
+interface BattleState {
+	tplId: string;
+	enemyName: string;
+	enemyTitle: string;
+	ehp: number;
+	ehpMax: number;
+	eatk: number;
+	edef: number;
+	epower: number;
+	rounds: number;
+	logs: LogEntry[];
+	status: "fighting" | "win" | "lose" | "retreat";
+	reward: number; // 胜利为修为奖励，失败为损失（正数）
+	firstClear: boolean; // 本场是否为首通
+	manualName: string | null; // 首通获得的功法名
+	pillName: string | null; // 胜利额外掉落的丹药名
+}
+
 interface PlayerState {
 	xp: number;
 	realmIndex: number;
@@ -109,6 +147,9 @@ interface PlayerState {
 	battlesLost: number;
 	qutiUsed: number; // 累计已服淬体丹数（永久 +80 气血上限/颗）
 	zengyuanUsed: number; // 累计已服增元丹数（永久 +8 攻击/颗）
+	manuals: string[]; // 已获得的功法 id
+	equipped: Record<ManualSlot, string | null>; // 三槽位装备中的功法
+	defeated: Record<string, boolean>; // 斗法台首通记录（对手 id）
 	cooldowns: Record<string, number>; // 对手 id → 剩余冷却息数
 	log: LogEntry[];
 }
@@ -208,6 +249,45 @@ const BATTLE_COOLDOWN = 20;
 /** 挑战所需最低气血比例 */
 const MIN_HP_RATIO = 0.3;
 
+// ==================== 功法（秘籍）====================
+
+/** 功法总表：品阶随斗法进度递进，装备后提供永久被动加成 */
+const MANUALS: Manual[] = [
+	{ id: "tuna", name: "吐纳诀", slot: "core", rarity: "凡品", color: "#9ca3af", desc: "道门入门心法，打坐收益 +5%", xpMult: 1.05, breakBonus: 0, hint: "创角即得" },
+	{ id: "tiebu", name: "铁布衫", slot: "body", rarity: "凡品", color: "#a8a29e", desc: "外门硬功，气血上限 +120、防御 +5", hpBonus: 120, defBonus: 5, hint: "首胜落霞妖狼" },
+	{ id: "qingmu", name: "青木长春功", slot: "core", rarity: "灵品", color: "#34d399", desc: "木系生生不息，打坐收益 +15%、突破 +3%", xpMult: 1.15, breakBonus: 0.03, hint: "首胜黑风寨散修" },
+	{ id: "liehuo", name: "烈火诀", slot: "attack", rarity: "灵品", color: "#f87171", desc: "火系攻伐，攻击 +12、造成伤害 +8%", atkBonus: 12, dmgMult: 1.08, hint: "首胜碧波潭蟒妖" },
+	{ id: "zixia", name: "紫霞心法", slot: "core", rarity: "宝品", color: "#c084fc", desc: "道门正宗心法，打坐收益 +25%、突破 +5%", xpMult: 1.25, breakBonus: 0.05, hint: "首胜逐风剑修" },
+	{ id: "jingang", name: "金刚不坏身", slot: "body", rarity: "宝品", color: "#fbbf24", desc: "佛门炼体绝学，气血上限 +350、防御 +14", hpBonus: 350, defBonus: 14, hint: "首胜赤焰妖王" },
+	{ id: "jiuzhuanx", name: "九转玄功", slot: "core", rarity: "天品", color: "#e879f9", desc: "道门无上心法，打坐收益 +40%、突破 +8%", xpMult: 1.4, breakBonus: 0.08, hint: "首胜九幽冥蛟" },
+	{ id: "zhuxian", name: "诛仙剑诀", slot: "attack", rarity: "天品", color: "#ef4444", desc: "上古攻伐第一，攻击 +35、造成伤害 +18%", atkBonus: 35, dmgMult: 1.18, hint: "修炼遗府奇遇" },
+];
+
+/** 斗法台首通固定掉落的功法（对手 id → 功法 id） */
+const FIRST_CLEAR_MANUAL: Record<string, string> = {
+	yaolang: "tiebu",
+	sanxiu: "qingmu",
+	mangyao: "liehuo",
+	jianxiu: "zixia",
+	yaowang: "jingang",
+	mingjiao: "jiuzhuanx",
+};
+
+/** 重复获得功法时折算的修为（按品阶） */
+const MANUAL_DUP_REWARD: Record<Manual["rarity"], number> = {
+	凡品: 500,
+	灵品: 2000,
+	宝品: 6000,
+	天品: 15000,
+};
+
+/** 典籍面板的槽位展示顺序 */
+const MANUAL_SLOTS: { slot: ManualSlot; label: string }[] = [
+	{ slot: "core", label: "主修心法" },
+	{ slot: "body", label: "炼体功法" },
+	{ slot: "attack", label: "攻伐法术" },
+];
+
 const CULTIVATE_TEXTS = [
 	"你盘膝而坐，吐纳天地灵气...",
 	"灵气入体，经脉微微发热...",
@@ -248,30 +328,39 @@ const EMPTY_PILLS: Record<PillId, number> = {
 	zengyuan: 0, tianyuan: 0, wudao: 0, jiuzhuan: 0,
 };
 
-let player = $state<PlayerState>({
-	xp: 0,
-	realmIndex: 0,
-	hp: 100,
-	lastBreakthrough: null,
-	totalBreaths: 0,
-	pills: { ...EMPTY_PILLS },
-	ningshenLeft: 0,
-	springLeft: 0,
-	wudaoLeft: 0,
-	veinLeft: 0,
-	pojingActive: false,
-	aptitude: null,
-	rootCombo: null,
-	spiritualRoots: [],
-	physique: null,
-	thunderPassed: 0,
-	battlesWon: 0,
-	battlesLost: 0,
-	qutiUsed: 0,
-	zengyuanUsed: 0,
-	cooldowns: {},
-	log: [],
-});
+/** 全新角色初始状态（初次进入、兵解转世、导入兜底时共用） */
+function makeFreshPlayer(): PlayerState {
+	return {
+		xp: 0,
+		realmIndex: 0,
+		hp: 100,
+		lastBreakthrough: null,
+		totalBreaths: 0,
+		pills: { ...EMPTY_PILLS },
+		ningshenLeft: 0,
+		springLeft: 0,
+		wudaoLeft: 0,
+		veinLeft: 0,
+		pojingActive: false,
+		aptitude: null,
+		rootCombo: null,
+		spiritualRoots: [],
+		physique: null,
+		thunderPassed: 0,
+		battlesWon: 0,
+		battlesLost: 0,
+		qutiUsed: 0,
+		zengyuanUsed: 0,
+		// 初始赠送入门心法并自动装备
+		manuals: ["tuna"],
+		equipped: { core: "tuna", body: null, attack: null },
+		defeated: {},
+		cooldowns: {},
+		log: [],
+	};
+}
+
+let player = $state<PlayerState>(makeFreshPlayer());
 
 let isMeditating = $state(false);
 let lastGain = $state<number | null>(null);
@@ -293,6 +382,14 @@ let thunderRound = $state(0);
 let thunderResults = $state<("pending" | "pass" | "fail")[]>([]);
 let thunderStriking = $state(false);
 let thunderPenalty = $state(0);
+
+// ---- 交互式斗法 ----
+let battle = $state<BattleState | null>(null);
+
+// ---- 存档导出/导入 ----
+let saveModalMode = $state<null | "export" | "import">(null);
+let importCode = $state("");
+let copyHint = $state("");
 
 // ==================== 属性计算 ====================
 
@@ -332,6 +429,11 @@ const demonWeight = $derived.by(() => {
 	return p * 400;
 });
 
+// ---- 已装备功法 ----
+const coreManual = $derived(MANUALS.find((m) => m.id === player.equipped.core) ?? null);
+const bodyManual = $derived(MANUALS.find((m) => m.id === player.equipped.body) ?? null);
+const attackManual = $derived(MANUALS.find((m) => m.id === player.equipped.attack) ?? null);
+
 const successRate = $derived.by(() => {
 	if (!nextRealm) return 0;
 	const base = Math.max(0.3, 0.9 - nextRealm.level * 0.06);
@@ -339,6 +441,7 @@ const successRate = $derived.by(() => {
 		rootBreakBonus +
 		(currentAptitude?.breakBonus ?? 0) +
 		(currentPhysique?.breakBonus ?? 0) +
+		(coreManual?.breakBonus ?? 0) +
 		(player.pojingActive ? 0.25 : 0);
 	return Math.min(0.95, base + bonus);
 });
@@ -348,28 +451,35 @@ const breathXp = $derived(
 		(5 + currentRealm.level * 3) *
 			(currentAptitude?.xpMult ?? 1) *
 			rootXpMult *
-			(currentPhysique?.xpMult ?? 1),
+			(currentPhysique?.xpMult ?? 1) *
+			(coreManual?.xpMult ?? 1),
 	),
 );
 
 // ---- 战斗属性：气血上限 / 攻击 / 防御 / 战力 ----
 
-/** 气血上限：境界 + 已服淬体丹的永久加成（注意：服用后才生效，与背包库存无关） */
-const maxHp = $derived(100 + currentRealm.level * 60 + player.qutiUsed * 80);
-/** 攻击：境界 + 已服增元丹的永久加成 + 真武体 */
+/** 气血上限：境界 + 淬体丹 + 炼体功法 */
+const maxHp = $derived(100 + currentRealm.level * 60 + player.qutiUsed * 80 + (bodyManual?.hpBonus ?? 0));
+/** 攻击：境界 + 增元丹 + 真武体 + 攻伐功法 */
 const atk = $derived(
 	Math.round(
-		(8 + currentRealm.level * 7 + player.zengyuanUsed * 8) *
+		(8 + currentRealm.level * 7 + player.zengyuanUsed * 8 + (attackManual?.atkBonus ?? 0)) *
 			(currentPhysique?.atkMult ?? 1),
 	),
 );
-/** 防御：仅随境界成长 */
-const def = $derived(4 + currentRealm.level * 4);
+/** 防御：境界 + 炼体功法 */
+const def = $derived(4 + currentRealm.level * 4 + (bodyManual?.defBonus ?? 0));
 /** 综合战力 */
 const battlePower = $derived(Math.round(maxHp * 0.5 + atk * 4 + def * 3));
 const hpPercent = $derived(Math.max(0, Math.round((player.hp / maxHp) * 100)));
 
 const eventChance = $derived(0.28 + (currentCombo?.allEventBonus ?? 0));
+
+/**
+ * 任意模态弹窗打开时，打坐周天完全暂停（不计息、不触发事件、不回血），
+ * 避免雷劫/突破/斗法结算与后台事件互相干扰。
+ */
+const meditationPaused = $derived(showThunderModal || showBreakthroughModal || battle !== null);
 
 // ==================== 持久化 ====================
 
@@ -393,6 +503,10 @@ function load() {
 				...data,
 				pills: { ...EMPTY_PILLS, ...(data.pills ?? {}) },
 				cooldowns: data.cooldowns ?? {},
+				// 旧档没有功法/首通数据：补发入门心法
+				manuals: Array.isArray(data.manuals) && data.manuals.length > 0 ? data.manuals : ["tuna"],
+				equipped: { core: "tuna", body: null, attack: null, ...(data.equipped ?? {}) },
+				defeated: data.defeated ?? {},
 			};
 			// 突破后可能出现气血超上限（理论不会），兜底修正
 			player.hp = Math.min(player.hp, maxHp);
@@ -633,13 +747,19 @@ function rollRandomEvent(base: number): EventResult {
 		weight: 12 * ff,
 		run: () => {
 			const delta = base * 15;
-			const gotPill = Math.random() < 0.35 && grantRandomPill();
-			addLog(
-				gotPill
-					? `你误入一座古修遗府，搜得灵石丹药，修为 +${delta}！`
-					: `你误入一座古修遗府，将府中残余灵气尽数炼化，修为 +${delta}！`,
-				"success",
-			);
+			// 12% 概率在遗府深处发现上古剑修遗刻（唯一的《诛仙剑诀》产出途径）
+			if (!player.manuals.includes("zhuxian") && Math.random() < 0.12) {
+				grantManual("zhuxian");
+				addLog(`遗府深处供着一卷上古剑修遗刻，修为另 +${delta}！`, "success");
+			} else {
+				const gotPill = Math.random() < 0.35 && grantRandomPill();
+				addLog(
+					gotPill
+						? `你误入一座古修遗府，搜得灵石丹药，修为 +${delta}！`
+						: `你误入一座古修遗府，将府中残余灵气尽数炼化，修为 +${delta}！`,
+					"success",
+				);
+			}
 			return { delta };
 		},
 	});
@@ -823,6 +943,9 @@ function rollRandomEvent(base: number): EventResult {
 let breathTimer: ReturnType<typeof setInterval> | null = null;
 
 function breathTick() {
+	// 雷劫/突破/斗法弹窗期间周天完全暂停：不计息、不回血、不减冷却、不触发事件
+	if (meditationPaused) return;
+
 	let xpGain = breathXp + Math.floor(Math.random() * (breathXp * 0.6 + 1));
 
 	if (player.ningshenLeft > 0) { xpGain *= 2; player.ningshenLeft -= 1; }
@@ -889,7 +1012,7 @@ function portal(node: HTMLElement) {
 
 // 任意弹窗打开时锁定背景滚动，关闭后恢复
 $effect(() => {
-	if (showThunderModal || showBreakthroughModal) {
+	if (showThunderModal || showBreakthroughModal || battle !== null || saveModalMode !== null) {
 		const prev = document.body.style.overflow;
 		document.body.style.overflow = "hidden";
 		return () => {
@@ -962,7 +1085,35 @@ function buyPill(pill: Pill) {
 	save();
 }
 
-// ==================== 斗法台 ====================
+// ==================== 功法 ====================
+
+/** 获得功法：新功法自动填入空闲槽位；重复功法折算修为。返回是否为首次获得 */
+function grantManual(id: string): boolean {
+	const m = MANUALS.find((x) => x.id === id);
+	if (!m) return false;
+	if (player.manuals.includes(id)) {
+		const reward = MANUAL_DUP_REWARD[m.rarity];
+		player.xp += reward;
+		addLog(`《${m.name}》你早已修成，残卷化作 ${reward} 修为感悟。`, "info");
+		return false;
+	}
+	player.manuals.push(id);
+	// 对应槽位若空着则自动装备，立刻生效
+	if (!player.equipped[m.slot]) player.equipped[m.slot] = id;
+	addLog(`你得到功法秘籍《${m.name}》（${m.rarity}）！`, "success");
+	return true;
+}
+
+/** 装备某功法到其对应槽位（同槽替换） */
+function equipManual(id: string) {
+	const m = MANUALS.find((x) => x.id === id);
+	if (!m || !player.manuals.includes(id) || player.equipped[m.slot] === id) return;
+	player.equipped[m.slot] = id;
+	addLog(`你改修《${m.name}》，功行切换，属性即时变化。`);
+	save();
+}
+
+// ==================== 斗法台（交互式回合战）====================
 
 /** 生成某对手当前数值（随玩家境界动态变化） */
 function getEnemy(tpl: EnemyTemplate): EnemyStats {
@@ -971,49 +1122,235 @@ function getEnemy(tpl: EnemyTemplate): EnemyStats {
 	return { tpl, level, ...base };
 }
 
-/** 主动挑战斗法台对手 */
-function challengeEnemy(tpl: EnemyTemplate) {
-	const cd = player.cooldowns[tpl.id] ?? 0;
-	if (cd > 0) return;
+/** 第 index 个对手是否解锁：首个默认开放，其余需先首通前一名 */
+function isEnemyUnlocked(index: number): boolean {
+	if (index <= 0) return true;
+	const prev = ENEMY_TEMPLATES[index - 1];
+	return Boolean(prev && player.defeated[prev.id]);
+}
+
+/** 玩家一击伤害：攻防公式 × 攻伐功法倍率 × ±15% 随机浮动，保底 1 */
+function rollMyDamage(enemyDef: number): number {
+	const v = (atk - enemyDef * 0.5) * (attackManual?.dmgMult ?? 1) * (0.85 + Math.random() * 0.3);
+	return Math.max(1, Math.round(v));
+}
+
+/** 敌人一击伤害：攻防公式 × ±15% 随机浮动，保底 1 */
+function rollEnemyDamage(enemyAtk: number): number {
+	const v = (enemyAtk - def * 0.5) * (0.85 + Math.random() * 0.3);
+	return Math.max(1, Math.round(v));
+}
+
+/** 向战斗播报区压入一条消息（最新在上，最多保留 12 条） */
+function battlePushLog(message: string, type: LogEntry["type"] = "info") {
+	if (!battle) return;
+	const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+	battle.logs = [{ time, message, type }, ...battle.logs].slice(0, 12);
+}
+
+/** 主动挑战：校验解锁/冷却/气血后开启斗法弹窗 */
+function startBattle(tpl: EnemyTemplate, index: number) {
+	if (battle || !isEnemyUnlocked(index)) return;
+	if ((player.cooldowns[tpl.id] ?? 0) > 0) return;
 	if (player.hp < maxHp * MIN_HP_RATIO) {
 		addLog(`你气血不足三成，不宜斗法，先打坐疗伤或服回春丹吧。`, "warning");
 		return;
 	}
-
 	const enemy = getEnemy(tpl);
-	// 回合制模拟：玩家先手
-	let php = player.hp;
-	let ehp = enemy.hp;
-	let rounds = 0;
-	while (php > 0 && ehp > 0 && rounds < 60) {
-		ehp -= Math.max(1, atk - enemy.def * 0.5);
-		if (ehp <= 0) break;
-		php -= Math.max(1, enemy.atk - def * 0.5);
-		rounds += 1;
-	}
-	const win = ehp <= 0;
-	player.hp = Math.max(0, php);
+	battle = {
+		tplId: tpl.id,
+		enemyName: tpl.name,
+		enemyTitle: tpl.title,
+		ehp: enemy.hp,
+		ehpMax: enemy.hp,
+		eatk: enemy.atk,
+		edef: enemy.def,
+		epower: enemy.power,
+		rounds: 1,
+		logs: [],
+		status: "fighting",
+		reward: 0,
+		firstClear: false,
+		manualName: null,
+		pillName: null,
+	};
+	battlePushLog(`你登台对阵「${tpl.name}」（战力 ${enemy.power}），战斗开始！`, "warning");
+}
 
-	if (win) {
-		const reward = Math.round(enemy.power * tpl.rewardFactor * 0.6);
-		player.xp += reward;
-		player.battlesWon += 1;
-		player.cooldowns[tpl.id] = BATTLE_COOLDOWN;
-		const gotPill = Math.random() < 0.35 && grantRandomPill();
-		addLog(
-			`斗法台 · 你 ${rounds + 1} 合击败「${tpl.name}」（战力 ${enemy.power}），获 ${reward} 修为${gotPill ? "与一颗丹药" : ""}！`,
-			"success",
-		);
-	} else {
-		const loss = Math.floor(player.xp * 0.05);
-		player.xp = Math.max(0, player.xp - loss);
-		player.battlesLost += 1;
-		addLog(
-			`斗法台 · 你不敌「${tpl.name}」（战力 ${enemy.power}），力竭败退，损失 ${loss} 修为，气血见底！`,
-			"danger",
-		);
+/** 敌人反击；若玩家被击杀则结算败北，返回是否已结束 */
+function enemyStrikeBack(): boolean {
+	const b = battle;
+	if (!b || b.status !== "fighting") return true;
+	const dmg = rollEnemyDamage(b.eatk);
+	player.hp = Math.max(0, player.hp - dmg);
+	battlePushLog(`「${b.enemyName}」反扑，你失去 ${dmg} 点气血。`, "danger");
+	if (player.hp <= 0) {
+		finishBattleLose();
+		return true;
 	}
+	b.rounds += 1;
+	return false;
+}
+
+/** 玩家操作：出手攻击 */
+function battleAttack() {
+	const b = battle;
+	const tpl = b ? ENEMY_TEMPLATES.find((t) => t.id === b.tplId) : undefined;
+	if (!b || !tpl || b.status !== "fighting") return;
+	const dmg = rollMyDamage(b.edef);
+	b.ehp = Math.max(0, b.ehp - dmg);
+	battlePushLog(`第 ${b.rounds} 合 · 你运剑猛攻，对「${b.enemyName}」造成 ${dmg} 点伤害。`);
+	if (b.ehp <= 0) {
+		finishBattleWin(tpl);
+		return;
+	}
+	enemyStrikeBack();
 	save();
+}
+
+/** 玩家操作：吞服回春丹（回复 50% 气血，但占用一回合，敌人照常反击） */
+function battleUsePill() {
+	const b = battle;
+	if (!b || b.status !== "fighting") return;
+	if (player.pills.huichun <= 0) {
+		battlePushLog("你摸出药瓶——回春丹早已用尽！", "warning");
+		return;
+	}
+	player.pills.huichun -= 1;
+	const before = player.hp;
+	healHp(maxHp * 0.5);
+	battlePushLog(`你吞下一颗回春丹，气血回升 ${player.hp - before} 点。`, "success");
+	if (!enemyStrikeBack()) save();
+}
+
+/** 玩家操作：主动撤退（无奖励无惩罚，不进入冷却） */
+function battleRetreat() {
+	const b = battle;
+	if (!b || b.status !== "fighting") return;
+	b.status = "retreat";
+	battlePushLog("你虚晃一招跳下斗法台，抽身而退。", "warning");
+	addLog(`你从与「${b.enemyName}」的斗法中主动撤退，无功无过。`, "warning");
+	save();
+}
+
+/** 胜利结算：基础修为 + 首通双倍 + 35% 掉丹 + 首通固定掉落功法 */
+function finishBattleWin(tpl: EnemyTemplate) {
+	const b = battle;
+	if (!b) return;
+	const enemy = getEnemy(tpl);
+	const base = Math.round(enemy.power * tpl.rewardFactor * 0.6);
+	const first = !player.defeated[tpl.id];
+	let total = base;
+	if (first) {
+		player.defeated[tpl.id] = true;
+		total += base; // 首通大奖：奖励翻倍
+	}
+	player.xp += total;
+	player.battlesWon += 1;
+	player.cooldowns[tpl.id] = BATTLE_COOLDOWN;
+
+	// 35% 概率额外掉一颗当前境界可炼的丹药
+	const pool = availablePills();
+	if (Math.random() < 0.35 && pool.length > 0) {
+		const pill = pool[Math.floor(Math.random() * pool.length)];
+		player.pills[pill.id] += 1;
+		b.pillName = pill.name;
+	}
+
+	// 首通掉落固定秘籍（grantManual 内部会写日志并自动装备空槽）
+	const manualId = FIRST_CLEAR_MANUAL[tpl.id];
+	if (first && manualId) {
+		const m = MANUALS.find((x) => x.id === manualId);
+		grantManual(manualId);
+		b.manualName = m ? m.name : null;
+	}
+
+	b.status = "win";
+	b.reward = total;
+	b.firstClear = first;
+	battlePushLog(`「${tpl.name}」被你斩于台下！获得 ${total} 修为${first ? "（首通双倍）" : ""}。`, "success");
+	addLog(
+		`斗法台 · 你 ${b.rounds} 合击败「${tpl.name}」（战力 ${enemy.power}），获 ${total} 修为` +
+			`${b.pillName ? `与一颗${b.pillName}` : ""}${first ? "，并解锁下一名对手" : ""}！`,
+		"success",
+	);
+	save();
+}
+
+/** 败北结算：扣 5% 修为、气血见底 */
+function finishBattleLose() {
+	const b = battle;
+	if (!b) return;
+	const loss = Math.floor(player.xp * 0.05);
+	player.xp = Math.max(0, player.xp - loss);
+	player.battlesLost += 1;
+	player.hp = 0;
+	b.status = "lose";
+	b.reward = loss;
+	battlePushLog(`你灵力枯竭倒在台上，损失 ${loss} 修为，气血见底。`, "danger");
+	addLog(`斗法台 · 你不敌「${b.enemyName}」（战力 ${b.epower}），力竭败退，损失 ${loss} 修为。`, "danger");
+	save();
+}
+
+function closeBattle() {
+	battle = null;
+}
+
+// ==================== 存档导出 / 导入 ====================
+
+/** 存档码：JSON → UTF-8 安全的 base64，复制保存即可跨设备迁移 */
+const exportCode = $derived(btoa(unescape(encodeURIComponent(JSON.stringify(player)))));
+
+function openSaveModal(mode: "export" | "import") {
+	saveModalMode = mode;
+	importCode = "";
+	copyHint = "";
+}
+
+function closeSaveModal() {
+	saveModalMode = null;
+}
+
+async function copyExportCode() {
+	try {
+		await navigator.clipboard.writeText(exportCode);
+		copyHint = "已复制到剪贴板，妥善保存即可";
+	} catch {
+		// 剪贴板权限被拒时，让用户在文本框内手动全选复制
+		const ta = document.getElementById("xx-export-code") as HTMLTextAreaElement | null;
+		ta?.select();
+		copyHint = "浏览器拒绝了自动复制，请手动 Ctrl+C";
+	}
+}
+
+function doImport() {
+	let data: Partial<PlayerState>;
+	try {
+		data = JSON.parse(decodeURIComponent(escape(atob(importCode.trim()))));
+	} catch {
+		alert("存档码无效或已损坏，无法解析。");
+		return;
+	}
+	if (!data || typeof data !== "object" || typeof data.xp !== "number" || typeof data.realmIndex !== "number") {
+		alert("存档内容缺少必要字段，不是有效的修仙存档。");
+		return;
+	}
+	if (!confirm("导入将覆盖当前所有进度，确定继续？")) return;
+	player = {
+		...makeFreshPlayer(),
+		...data,
+		pills: { ...EMPTY_PILLS, ...(data.pills ?? {}) },
+		cooldowns: data.cooldowns ?? {},
+		manuals: Array.isArray(data.manuals) && data.manuals.length > 0 ? data.manuals : ["tuna"],
+		equipped: { core: "tuna", body: null, attack: null, ...(data.equipped ?? {}) },
+		defeated: data.defeated ?? {},
+		log: Array.isArray(data.log) ? data.log : [],
+	};
+	// 气血兜底：炼体功法/淬体丹变化后可能超上限
+	player.hp = Math.max(0, Math.min(player.hp ?? maxHp, maxHp));
+	save();
+	addLog("存档导入成功，道途接续。", "success");
+	saveModalMode = null;
 }
 
 // ==================== 突破与雷劫 ====================
@@ -1109,32 +1446,11 @@ function doBreakthroughCheck(rate: number) {
 }
 
 function resetGame() {
-	if (!confirm("确定要兵解转世，重新来过吗？（修为、境界、丹药、天命全部清空）")) return;
+	if (!confirm("确定要兵解转世，重新来过吗？（修为、境界、丹药、功法、斗法战绩、天命全部清空）")) return;
 	stopMeditation();
-	player = {
-		xp: 0,
-		realmIndex: 0,
-		hp: 100,
-		lastBreakthrough: null,
-		totalBreaths: 0,
-		pills: { ...EMPTY_PILLS },
-		ningshenLeft: 0,
-		springLeft: 0,
-		wudaoLeft: 0,
-		veinLeft: 0,
-		pojingActive: false,
-		aptitude: null,
-		rootCombo: null,
-		spiritualRoots: [],
-		physique: null,
-		thunderPassed: 0,
-		battlesWon: 0,
-		battlesLost: 0,
-		qutiUsed: 0,
-		zengyuanUsed: 0,
-		cooldowns: {},
-		log: [],
-	};
+	battle = null;
+	saveModalMode = null;
+	player = makeFreshPlayer();
 	aptitudeResult = null;
 	rootComboResult = null;
 	physiqueResult = null;
@@ -1305,17 +1621,19 @@ function closeModal() {
 					{/if}
 				</div>
 				<div class="meditation-info">
-					<div class="meditation-status">
-						{#if isMeditating}
-							<span class="status-running">运转周天中 · 每息约 +{lastGain ?? breathXp}（同步疗伤）</span>
-						{:else}
-							<span class="status-idle">入定吐纳 · 奇遇天灾自动降临，不再中断</span>
-						{/if}
-					</div>
-					<button class="btn meditate-btn" class:pause={isMeditating} onclick={toggleMeditation}>
-						{isMeditating ? "暂停打坐" : "开始打坐"}
-					</button>
+				<div class="meditation-status">
+					{#if isMeditating && meditationPaused}
+						<span class="status-paused">周天暂停中 · 雷劫/斗法结束后自动续上</span>
+					{:else if isMeditating}
+						<span class="status-running">运转周天中 · 每息约 +{lastGain ?? breathXp}（同步疗伤）</span>
+					{:else}
+						<span class="status-idle">入定吐纳 · 奇遇天灾自动降临，不再中断</span>
+					{/if}
 				</div>
+				<button class="btn meditate-btn" class:pause={isMeditating} onclick={toggleMeditation}>
+					{isMeditating ? "暂停打坐" : "开始打坐"}
+				</button>
+			</div>
 			</div>
 
 			{#if canBreakthrough}
@@ -1330,11 +1648,15 @@ function closeModal() {
 			{/if}
 
 			<div class="stats">
-				<span>累计吐纳: {player.totalBreaths} 息</span>
-				<span>斗法战绩: {player.battlesWon} 胜 / {player.battlesLost} 负</span>
-				{#if player.lastBreakthrough}<span>上次突破: {player.lastBreakthrough}</span>{/if}
+			<span>累计吐纳: {player.totalBreaths} 息</span>
+			<span>斗法战绩: {player.battlesWon} 胜 / {player.battlesLost} 负</span>
+			{#if player.lastBreakthrough}<span>上次突破: {player.lastBreakthrough}</span>{/if}
+			<span class="stats-actions">
+				<button class="reset-btn" onclick={() => openSaveModal("export")}>导出存档</button>
+				<button class="reset-btn" onclick={() => openSaveModal("import")}>导入存档</button>
 				<button class="reset-btn" onclick={resetGame}>兵解转世</button>
-			</div>
+			</span>
+		</div>
 		</div>
 
 		<!-- ========== 斗法台 ========== -->
@@ -1344,35 +1666,77 @@ function closeModal() {
 				<span class="pill-subtitle">我方战力 {battlePower.toLocaleString()} · 气血低于 30% 不可挑战 · 胜后冷却 {BATTLE_COOLDOWN} 息</span>
 			</div>
 			<div class="arena-list">
-				{#each ENEMY_TEMPLATES as tpl (tpl.id)}
-					{@const enemy = getEnemy(tpl)}
-					{@const cd = player.cooldowns[tpl.id] ?? 0}
-					{@const weaker = enemy.power < battlePower}
-					<div class="arena-item">
-						<div class="arena-info">
-							<div class="arena-name">
-								{tpl.name}
-								<span class="arena-title">{tpl.title}</span>
+			{#each ENEMY_TEMPLATES as tpl, i (tpl.id)}
+				{@const enemy = getEnemy(tpl)}
+				{@const cd = player.cooldowns[tpl.id] ?? 0}
+				{@const weaker = enemy.power < battlePower}
+				{@const unlocked = isEnemyUnlocked(i)}
+				{@const cleared = Boolean(player.defeated[tpl.id])}
+				<div class="arena-item" class:locked={!unlocked}>
+					<div class="arena-info">
+						<div class="arena-name">
+							{unlocked ? tpl.name : "？？？"}
+							{#if unlocked}<span class="arena-title">{tpl.title}</span>{/if}
+							{#if unlocked}
 								<span class="arena-tag" class:tag-danger={!weaker} class:tag-safe={weaker}>
 									{weaker ? "势弱" : "势强"}
 								</span>
-							</div>
-							<div class="arena-stats">
+								{#if cleared}<span class="arena-tag tag-cleared">已降</span>{/if}
+								{#if !cleared}<span class="arena-tag tag-first">首通双倍</span>{/if}
+							{/if}
+						</div>
+						<div class="arena-stats">
+							{#if unlocked}
 								战力 {enemy.power.toLocaleString()} · 胜赏约 {Math.round(enemy.power * tpl.rewardFactor * 0.6).toLocaleString()} 修为
 								{#if cd > 0}<span class="arena-cd"> · 冷却 {cd} 息</span>{/if}
-							</div>
+							{:else}
+								<span class="arena-locked-text">🔒 先首胜「{ENEMY_TEMPLATES[i - 1]?.name}」方可挑战</span>
+							{/if}
 						</div>
-						<button
-							class="btn arena-btn"
-							disabled={cd > 0 || player.hp < maxHp * MIN_HP_RATIO}
-							onclick={() => challengeEnemy(tpl)}
-						>
-							{cd > 0 ? "休整中" : "挑战"}
-						</button>
 					</div>
-				{/each}
-			</div>
+					<button
+						class="btn arena-btn"
+						disabled={!unlocked || cd > 0 || player.hp < maxHp * MIN_HP_RATIO}
+						onclick={() => startBattle(tpl, i)}
+					>
+						{!unlocked ? "未解锁" : cd > 0 ? "休整中" : "挑战"}
+					</button>
+				</div>
+			{/each}
 		</div>
+	</div>
+
+	<!-- ========== 功法典籍 ========== -->
+	<div class="manual-card">
+		<div class="pill-header">
+			<h3 class="pill-title">功法典籍</h3>
+			<span class="pill-subtitle">三槽各修一本 · 被动即时生效 · 斗法首通有秘籍掉落</span>
+		</div>
+		{#each MANUAL_SLOTS as { slot, label } (slot)}
+			<div class="manual-slot">
+				<div class="manual-slot-label">{label}</div>
+				<div class="manual-items">
+					{#each MANUALS.filter((m) => m.slot === slot) as m (m.id)}
+						{@const owned = player.manuals.includes(m.id)}
+						{@const on = player.equipped[slot] === m.id}
+						<button
+							class="manual-chip"
+							class:owned
+							class:on
+							disabled={!owned}
+							title={owned ? m.desc : m.hint}
+							onclick={() => equipManual(m.id)}
+							style={on ? `border-color: ${m.color}; color: ${m.color}; box-shadow: 0 0 0 1px ${m.color}55 inset;` : ""}
+						>
+							<span class="manual-chip-name">{owned ? m.name : "？？？"}</span>
+							<span class="manual-chip-rarity" style={owned ? `color: ${m.color}` : ""}>{m.rarity}</span>
+							<span class="manual-chip-desc">{owned ? m.desc : m.hint}</span>
+						</button>
+					{/each}
+				</div>
+			</div>
+		{/each}
+	</div>
 
 		<!-- ========== 炼丹坊 ========== -->
 		<div class="pill-card">
@@ -1489,6 +1853,113 @@ function closeModal() {
 						<h3>突破失败</h3>
 						<p>真元逆流，损失 15% 修为与一成气血。再战！</p>
 						<button class="btn" onclick={closeModal}>继续修炼</button>
+					</div>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
+	<!-- ========== 交互式斗法弹窗 ========== -->
+	{#if battle}
+		{@const myPct = Math.max(0, Math.round((player.hp / maxHp) * 100))}
+		{@const enemyPct = Math.max(0, Math.round((battle.ehp / battle.ehpMax) * 100))}
+		<div
+			class="modal-overlay"
+			use:portal
+			onclick={() => {
+				if (battle.status !== "fighting") closeBattle();
+			}}
+		>
+			<div class="modal-content battle-modal" onclick={(e) => e.stopPropagation()}>
+				<h3 class="battle-title">斗法台 · 第 {battle.rounds} 合</h3>
+
+				<!-- 敌方 -->
+				<div class="battle-side enemy-side">
+					<div class="stat-label">
+						<span>「{battle.enemyName}」 · {battle.enemyTitle}</span>
+						<span>战力 {battle.epower.toLocaleString()}</span>
+					</div>
+					<div class="hp-bar">
+						<div class="hp-fill enemy-fill" style="width: {enemyPct}%"></div>
+					</div>
+					<div class="battle-hp-text">{Math.round(battle.ehp)} / {battle.ehpMax}（{enemyPct}%）</div>
+				</div>
+
+				<!-- 我方 -->
+				<div class="battle-side">
+					<div class="stat-label">
+						<span>你 · {currentRealm.name}修士</span>
+						<span>战力 {battlePower.toLocaleString()}</span>
+					</div>
+					<div class="hp-bar">
+						<div class="hp-fill" class:hp-low-fill={myPct < 30} style="width: {myPct}%"></div>
+					</div>
+					<div class="battle-hp-text">{Math.round(player.hp)} / {maxHp}（{myPct}%）</div>
+				</div>
+
+				<!-- 回合播报 -->
+				<div class="battle-log">
+					{#each battle.logs as entry (entry.time + entry.message)}
+						<div class={`battle-log-line log-${entry.type}`}>[{entry.time}] {entry.message}</div>
+					{/each}
+				</div>
+
+				{#if battle.status === "fighting"}
+					<div class="battle-actions">
+						<button class="btn battle-btn-attack" onclick={battleAttack}>出手攻击</button>
+						<button class="btn battle-btn-pill" disabled={player.pills.huichun <= 0} onclick={battleUsePill}>
+							回春丹 ×{player.pills.huichun}
+						</button>
+						<button class="btn battle-btn-retreat" onclick={battleRetreat}>撤退</button>
+					</div>
+					<p class="battle-tip">攻击或服丹后敌方立即反击；服丹占用一回合，气血低于对手时请权衡。</p>
+				{:else if battle.status === "win"}
+					<div class="battle-result result-win">
+						<div class="icon">胜</div>
+						<p>
+							{battle.firstClear ? "首通大捷！" : "斗法获胜！"} 获得 <strong>{battle.reward.toLocaleString()}</strong> 修为
+							{battle.pillName ? `，另缴获一颗${battle.pillName}` : ""}
+							{battle.manualName ? `，夺得失传秘籍《${battle.manualName}》` : ""}
+						</p>
+						<button class="btn" onclick={closeBattle}>收下战果</button>
+					</div>
+				{:else if battle.status === "lose"}
+					<div class="battle-result result-lose">
+						<div class="icon">败</div>
+						<p>力竭败退，损失 <strong>{battle.reward.toLocaleString()}</strong> 修为，气血见底。回打坐或回春丹疗伤后再战。</p>
+						<button class="btn" onclick={closeBattle}>黯然下台</button>
+					</div>
+				{:else}
+					<div class="battle-result result-retreat">
+						<div class="icon">退</div>
+						<p>你主动抽身而退，无功无过，气血保持当前。</p>
+						<button class="btn" onclick={closeBattle}>返回</button>
+					</div>
+				{/if}
+			</div>
+		</div>
+	{/if}
+
+	<!-- ========== 存档导出 / 导入弹窗 ========== -->
+	{#if saveModalMode}
+		<div class="modal-overlay" use:portal onclick={closeSaveModal}>
+			<div class="modal-content save-modal" onclick={(e) => e.stopPropagation()}>
+				{#if saveModalMode === "export"}
+					<h3>导出存档</h3>
+					<p class="save-desc">复制下面这串存档码，发给自己或存到记事本：换浏览器/换设备/清缓存后，凭它原样恢复全部进度。</p>
+					<textarea id="xx-export-code" class="save-code" readonly value={exportCode} rows="6"></textarea>
+					<div class="save-actions">
+						<button class="btn" onclick={copyExportCode}>复制存档码</button>
+						<button class="btn btn-ghost" onclick={closeSaveModal}>关闭</button>
+					</div>
+					{#if copyHint}<p class="save-hint">{copyHint}</p>{/if}
+				{:else}
+					<h3>导入存档</h3>
+					<p class="save-desc">把之前导出的存档码完整粘贴到下方，导入会覆盖当前进度（建议先导出当前存档备份）。</p>
+					<textarea class="save-code" bind:value={importCode} rows="6" placeholder="在此粘贴存档码..."></textarea>
+					<div class="save-actions">
+						<button class="btn" disabled={importCode.trim().length === 0} onclick={doImport}>确认导入</button>
+						<button class="btn btn-ghost" onclick={closeSaveModal}>取消</button>
 					</div>
 				{/if}
 			</div>
@@ -1623,10 +2094,14 @@ function closeModal() {
 	font-size: 0.78rem; color: var(--content-meta, #9ca3af); margin-top: 0.75rem;
 }
 .reset-btn {
-	margin-left: auto; font-size: 0.75rem; color: #f87171;
+	font-size: 0.75rem; color: #f87171;
 	background: none; border: none; cursor: pointer; opacity: 0.7;
 }
 .reset-btn:hover { opacity: 1; text-decoration: underline; }
+/* 多个统计操作按钮挤在最右侧 */
+.stats-actions { margin-left: auto; display: inline-flex; gap: 0.9rem; align-items: center; }
+.stats-actions .reset-btn { margin-left: 0; }
+.status-paused { color: #fbbf24; font-weight: 600; }
 
 /* ===== 斗法台（宽屏两列排列，缩短纵向长度）===== */
 .arena-list { display: grid; grid-template-columns: 1fr; gap: 0.6rem; }
@@ -1651,6 +2126,93 @@ function closeModal() {
 	flex-shrink: 0; padding: 0.45rem 1.1rem;
 	background: linear-gradient(90deg, #dc2626, #ef4444);
 }
+/* 未解锁的对手整体压暗 */
+.arena-item.locked { opacity: 0.55; }
+.arena-locked-text { color: #9ca3af; font-size: 0.74rem; }
+.tag-cleared { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; }
+.tag-first { background: rgba(251, 191, 36, 0.15); color: #fbbf24; }
+
+/* ===== 功法典籍 ===== */
+.manual-card {
+	background: var(--card-bg, rgba(255, 255, 255, 0.03));
+	border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.15));
+	border-radius: 1rem;
+	padding: 1.15rem 1.25rem;
+	display: flex; flex-direction: column; gap: 0.85rem;
+}
+.manual-slot { display: flex; gap: 0.85rem; align-items: flex-start; }
+.manual-slot-label {
+	flex-shrink: 0; width: 4.2rem; padding-top: 0.4rem;
+	font-size: 0.78rem; font-weight: 700; color: var(--content-meta, #9ca3af);
+}
+.manual-items { flex: 1; display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.manual-chip {
+	display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem;
+	padding: 0.45rem 0.7rem; border-radius: 0.6rem;
+	background: rgba(128, 128, 128, 0.06);
+	border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.18));
+	color: var(--content-meta, #9ca3af); cursor: pointer; text-align: left;
+	min-width: 10.5rem; max-width: 13rem;
+	transition: transform 0.15s, border-color 0.15s, background 0.15s;
+}
+button.manual-chip.owned { color: #e5e7eb; }
+button.manual-chip.owned:hover { border-color: rgba(99, 102, 241, 0.6); transform: translateY(-1px); }
+.manual-chip:disabled { cursor: not-allowed; opacity: 0.6; }
+.manual-chip-name { font-size: 0.88rem; font-weight: 700; }
+.manual-chip-rarity { font-size: 0.66rem; }
+.manual-chip-desc { font-size: 0.68rem; opacity: 0.8; line-height: 1.35; }
+
+/* ===== 交互式斗法弹窗 ===== */
+.battle-modal { max-width: 30rem; text-align: left; }
+.battle-title { margin: 0 0 0.9rem; font-size: 1.1rem; text-align: center; }
+.battle-side { margin-bottom: 0.7rem; }
+.battle-side.enemy-side .stat-label { color: #f87171; }
+.battle-hp-text { font-size: 0.72rem; color: var(--content-meta, #9ca3af); margin-top: 0.2rem; text-align: right; }
+.enemy-fill { background: linear-gradient(90deg, #b91c1c, #f87171); }
+.battle-log {
+	margin: 0.85rem 0; padding: 0.6rem 0.7rem; border-radius: 0.6rem;
+	background: rgba(0, 0, 0, 0.25); border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.15));
+	max-height: 8rem; overflow-y: auto;
+	display: flex; flex-direction: column; gap: 0.25rem;
+	font-size: 0.75rem; line-height: 1.45;
+}
+.battle-log-line { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; }
+.log-success { color: #4ade80; }
+.log-danger { color: #f87171; }
+.log-warning { color: #fbbf24; }
+.log-info { color: var(--content-meta, #9ca3af); }
+.battle-actions { display: flex; gap: 0.6rem; }
+.battle-actions .btn { flex: 1; padding: 0.6rem 0.5rem; }
+.battle-btn-attack { background: linear-gradient(90deg, #dc2626, #ef4444); }
+.battle-btn-pill { background: linear-gradient(90deg, #059669, #10b981); }
+.battle-btn-retreat { background: #4b5563; }
+.battle-tip { font-size: 0.7rem; color: var(--content-meta, #9ca3af); text-align: center; margin: 0.6rem 0 0; }
+.battle-result { text-align: center; }
+.battle-result .icon {
+	width: 3.2rem; height: 3.2rem; margin: 0.2rem auto 0.8rem; border-radius: 50%;
+	display: flex; align-items: center; justify-content: center;
+	font-size: 1.3rem; font-weight: 800; color: #fff;
+}
+.result-win .icon { background: linear-gradient(135deg, #16a34a, #4ade80); }
+.result-lose .icon { background: linear-gradient(135deg, #b91c1c, #f87171); }
+.result-retreat .icon { background: #6b7280; }
+.battle-result p { font-size: 0.88rem; line-height: 1.6; margin: 0 0 1rem; }
+
+/* ===== 存档导出 / 导入 ===== */
+.save-modal { max-width: 30rem; }
+.save-desc { font-size: 0.82rem; color: var(--content-meta, #9ca3af); line-height: 1.6; margin: 0.5rem 0 0.8rem; }
+.save-code {
+	width: 100%; box-sizing: border-box; resize: vertical;
+	padding: 0.6rem 0.7rem; border-radius: 0.6rem;
+	background: rgba(0, 0, 0, 0.3);
+	border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.25));
+	color: #e5e7eb; font-size: 0.72rem; font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+	word-break: break-all;
+}
+.save-code:focus { outline: none; border-color: var(--primary, #6366f1); }
+.save-actions { display: flex; gap: 0.6rem; margin-top: 0.8rem; }
+.btn-ghost { background: transparent; border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.35)); color: var(--content-meta, #9ca3af); }
+.save-hint { font-size: 0.75rem; color: #4ade80; margin: 0.6rem 0 0; }
 
 /* ===== 丹药 ===== */
 .pill-header { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
