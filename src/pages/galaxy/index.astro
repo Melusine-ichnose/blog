@@ -10,6 +10,59 @@ import GalaxyCanvas from "@components/pages/GalaxyCanvas.svelte";
   <div class="galaxy-page">
     <GalaxyCanvas client:load />
 
+    <!-- 左侧 Python 代码装饰层：还原"代码为轨"的视频氛围，随动画缓慢上滚 -->
+    <div class="code-panel" aria-hidden="true">
+      <pre class="code-scroll">{`import random
+from math import sin, cos, pi, log
+from tkinter import *
+
+CANVAS_WIDTH  = 640
+CANVAS_HEIGHT = 480
+
+# 3D 爱心隐式曲面
+def heart_surface(x, y, z):
+    a = x*x + (9/4)*z*z + y*y - 1
+    return a**3 - x*x*y**3 - (9/80)*z*z*y**3
+
+def scatter_inside(x, y, beta=0.15):
+    rx = -beta * log(random.random())
+    ry = -beta * log(random.random())
+    dx = rx * (x - CANVAS_WIDTH/2)
+    dy = ry * (y - CANVAS_HEIGHT/2)
+    return x - dx, y - dy
+
+# 蝴蝶参数曲线
+def butterfly(t):
+    f = exp(cos(t)) - 2*cos(4*t) \\
+        - sin(t/12)**5
+    return sin(t)*f, cos(t)*f
+
+# 火箭：圆锥 + 圆柱 + 尾翼
+def rocket(u, v):
+    x = -0.55 + u
+    r = 0.22
+    return x, cos(v*2*pi)*r, sin(v*2*pi)*r
+
+class Orbit:
+    def __init__(self):
+        self.points = []
+        self.phase  = "form"
+        self.rot    = 0.0
+
+    def morph(self, target):
+        for p in self.points:
+            p.seek(target, rate=0.08)
+
+    def cruise(self):
+        # 以代码为轨，穿梭数字星河
+        self.pos += self.dir * 0.9
+
+while True:
+    orbit.morph(shapes[i])
+    orbit.cruise()
+    i = (i + 1) % len(shapes)`}</pre>
+    </div>
+
     <!-- 入场遮罩：标题打字 + 辉光，点击"进入星河"后曲速冲刺 -->
     <div id="galaxy-intro" class="galaxy-intro" role="dialog" aria-label="数字星河入口">
       <div class="intro-inner">
@@ -63,6 +116,45 @@ import GalaxyCanvas from "@components/pages/GalaxyCanvas.svelte";
     z-index: 5;
     overflow: hidden;
     background: #05060f;
+  }
+
+  /* 左侧代码装饰面板：还原视频左半屏的 Python 代码氛围 */
+  .code-panel {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 1.2rem;
+    width: 24rem;
+    z-index: 6;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0.34;
+    /* 上下渐隐，融入深空背景 */
+    mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 12%, #000 88%, transparent);
+  }
+  .code-scroll {
+    font-family: ui-monospace, "JetBrains Mono", Consolas, monospace;
+    font-size: 0.72rem;
+    line-height: 1.75;
+    color: #7dd3fc;
+    text-shadow: 0 0 8px rgba(56, 189, 248, 0.4);
+    white-space: pre;
+    animation: code-scroll 28s linear infinite alternate;
+  }
+  @keyframes code-scroll {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(-32%);
+    }
+  }
+  /* 窄屏隐藏代码面板，避免遮挡粒子主体 */
+  @media (max-width: 1023px) {
+    .code-panel {
+      display: none;
+    }
   }
 
   .galaxy-intro {

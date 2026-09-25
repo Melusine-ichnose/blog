@@ -2673,15 +2673,16 @@ function closeModal() {
 .enhance-actions { display: flex; gap: 0.6rem; justify-content: center; }
 .offline-modal { max-width: 24rem; }
 .offline-title { margin: 0 0 0.5rem; color: #fbbf24; }
-.offline-desc { font-size: 0.9rem; margin: 0 0 1rem; }
+.offline-desc { font-size: 0.9rem; margin: 0 0 1rem; color: #e2e8f0; }
+.offline-desc strong { color: #fbbf24; }
 .offline-rewards { display: flex; gap: 0.75rem; justify-content: center; margin-bottom: 1rem; }
 .offline-reward {
 	padding: 0.5rem 0.85rem; border-radius: 0.6rem; background: rgba(128, 128, 128, 0.08);
 	display: flex; flex-direction: column; gap: 0.1rem; min-width: 6.5rem;
 }
-.offline-key { font-size: 0.7rem; color: var(--content-meta, #9ca3af); }
+.offline-key { font-size: 0.72rem; color: #cbd5e1; }
 .offline-val { font-size: 1.1rem; font-weight: 800; color: #4ade80; }
-.offline-tip { font-size: 0.78rem; color: var(--content-meta, #9ca3af); margin: 0 0 1rem; }
+.offline-tip { font-size: 0.8rem; color: #cbd5e1; margin: 0 0 1rem; }
 
 /* ===== 战力面板（宽屏气血条与攻防横向并排，压缩纵向高度）===== */
 .power-panel {
