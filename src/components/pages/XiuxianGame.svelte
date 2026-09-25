@@ -873,6 +873,31 @@ function stopMeditation() {
 
 onDestroy(() => stopMeditation());
 
+/**
+ * 传送门动作：把弹窗节点直接挂到 <body> 下。
+ * 原因：外层布局的页面过渡动画带有 transform，会使内部 position:fixed
+ * 相对该容器而非浏览器视口定位，导致弹窗偏下、遮罩盖不全；挂到 body 后恢复正常。
+ */
+function portal(node: HTMLElement) {
+	document.body.appendChild(node);
+	return {
+		destroy() {
+			node.remove();
+		},
+	};
+}
+
+// 任意弹窗打开时锁定背景滚动，关闭后恢复
+$effect(() => {
+	if (showThunderModal || showBreakthroughModal) {
+		const prev = document.body.style.overflow;
+		document.body.style.overflow = "hidden";
+		return () => {
+			document.body.style.overflow = prev;
+		};
+	}
+});
+
 // ==================== 丹药 ====================
 
 function usePill(pill: Pill) {
@@ -1404,7 +1429,7 @@ function closeModal() {
 
 	<!-- ========== 雷劫弹窗 ========== -->
 	{#if showThunderModal}
-		<div class="modal-overlay">
+		<div class="modal-overlay" use:portal>
 			<div class="modal-content thunder-modal" onclick={(e) => e.stopPropagation()}>
 				<h3 class="thunder-title">天雷劫 · {nextRealm?.name}</h3>
 				<p class="thunder-sub">三道天雷，道道要命。硬抗凭运，祭丹可解。</p>
@@ -1443,7 +1468,7 @@ function closeModal() {
 
 	<!-- ========== 突破结果弹窗 ========== -->
 	{#if showBreakthroughModal}
-		<div class="modal-overlay" onclick={closeModal}>
+		<div class="modal-overlay" use:portal onclick={closeModal}>
 			<div class="modal-content" onclick={(e) => e.stopPropagation()}>
 				{#if breakthroughResult === "idle"}
 					<div class="breakthrough-loading">
@@ -1649,12 +1674,13 @@ function closeModal() {
 /* ===== 弹窗 ===== */
 .modal-overlay {
 	position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
-	display: flex; align-items: center; justify-content: center; z-index: 100;
+	display: flex; align-items: center; justify-content: center; z-index: 9999;
 }
 .modal-content {
 	background: var(--card-bg-solid, #1e1e2e);
 	border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.25));
 	border-radius: 1rem; padding: 2rem; max-width: 26rem; width: calc(100% - 3rem); text-align: center;
+	max-height: calc(100vh - 4rem); overflow-y: auto;
 }
 .breakthrough-loading .spinner {
 	width: 2.5rem; height: 2.5rem;
