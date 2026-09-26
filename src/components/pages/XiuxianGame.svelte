@@ -174,6 +174,22 @@ interface EquipItem {
 	enhance: number; // 强化等级 0~9，每级 +10%×base（向下取整）
 }
 
+/** v12 天赋技能：依灵根五行与先天体质觉醒，斗法中消耗灵力（蓝条）施放 */
+interface SkillDef {
+	id: string;
+	name: string;
+	color: string;
+	desc: string;
+	cost: number; // 灵力消耗
+	minRealm: number; // 觉醒所需境界下标
+	kind: "attack" | "heal" | "shield" | "buff";
+	mult?: number; // attack：攻击倍率
+	healPct?: number; // heal：按气血上限回复比例
+	shieldMult?: number; // shield：减伤比例（本回合）
+	turns?: number; // buff：持续回合数（该期间敌方反击伤害减半）
+	passive?: string; // 被动天赋说明（自动生效）
+}
+
 interface Manual {
 	id: string;
 	name: string;
@@ -194,7 +210,7 @@ interface Manual {
 /** 交互式斗法的运行时状态 */
 interface BattleState {
 	tplId: string;
-	source: "arena" | "tower"; // 敌人来源：斗法台 / 试炼塔（复用同一套回合战斗）
+	source: "arena" | "tower" | "ascend"; // 敌人来源：斗法台 / 试炼塔 / 飞升守门使（复用同一套回合战斗）
 	towerN: number; // 试炼层数（斗法台为 0）
 	enemyName: string;
 	enemyTitle: string;
@@ -214,6 +230,10 @@ interface BattleState {
 	equipName: string | null; // 胜利掉落的法宝名
 	stunned: boolean; // 镇妖符：本回合敌人无法反击
 	killUsed: boolean; // 本场是否已用过道衍杀招
+	// v12 技能状态
+	shieldTurns: number; // 护盾剩余回合（本回合受伤 ×shieldMult）
+	shieldMult: number; // 护盾减伤系数
+	buffTurns: number; // 增益剩余回合（期间敌方反击减半）
 }
 
 interface PlayerState {
@@ -270,6 +290,9 @@ interface PlayerState {
 	bodyWound: number; // 躯府损伤 0~100（≥60 受损，灵虫战力减半；100 崩毁）
 	scout: boolean; // 下一次秘境探索是否已以神识探查
 	fateCheat: boolean; // 真仙秘术「命运篡改」：下次突破无雷直过
+	// v12 灵力（蓝条）与真仙飞升
+	mp: number; // 当前灵力（蓝条），斗法施放天赋技能消耗，打坐/回合回复
+	ascend: { clues: number; bossDefeated: boolean; ascended: boolean }; // 飞升三录：飞升遗简 → 斩守门使 → 融合贯通成唯一真仙
 }
 
 interface LogEntry {
@@ -298,7 +321,7 @@ const REALMS: Realm[] = [
 	{ name: "洞虚境", level: 10, requiredXp: 55000, description: "洞彻虚空，初解因果之秘", thunderTrial: true, lifespan: 4500 },
 	{ name: "大乘境", level: 11, requiredXp: 110000, description: "大乘度世，因果秘术加身", thunderTrial: true, lifespan: 6000 },
 	{ name: "渡劫境", level: 12, requiredXp: 230000, description: "渡九九天劫，成就不灭之躯", thunderTrial: true, lifespan: 8000 },
-	{ name: "真仙境", level: 13, requiredXp: Infinity, description: "破碎飞升，与天地同寿", thunderTrial: true, lifespan: 12000 },
+	{ name: "真仙境", level: 13, requiredXp: 350000, description: "破碎飞升，与天地同寿", thunderTrial: true, lifespan: 12000 },
 ];
 
 /** 九阶旧档 → 十三阶新境界的迁移映射（旧 0~8 → 新 index） */
@@ -490,6 +513,59 @@ const EQUIP_POOL: { tid: string; name: string; slot: EquipSlot; rarity: EquipRar
 	{ tid: "shanhetu", name: "山河社稷图", slot: "artifact", rarity: "宝器", base: 140 },
 	{ tid: "donghuang", name: "东皇钟", slot: "artifact", rarity: "仙器", base: 200 },
 ];
+
+// ==================== v12 灵力天赋技能 ====================
+
+/** 灵力上限基数：随境界与道韵成长 */
+const MP_BASE = 40;
+/** 灵根五行技能池：按灵根元素觉醒（多条灵根可觉醒多系），筑基（idx 3）起 */
+const ELEMENT_SKILLS: Record<string, SkillDef[]> = {
+	jin: [
+		{ id: "jin1", name: "庚金剑气", color: "#eab308", desc: "凝金为刃，造成 1.6× 攻击伤害", cost: 20, minRealm: 3, kind: "attack", mult: 1.6 },
+		{ id: "jin2", name: "万剑归宗", color: "#fbbf24", desc: "剑雨临空，造成 2.4× 攻击伤害", cost: 40, minRealm: 6, kind: "attack", mult: 2.4 },
+	],
+	mu: [
+		{ id: "mu1", name: "枯木逢春", color: "#22c55e", desc: "木灵回春，恢复 35% 气血", cost: 25, minRealm: 3, kind: "heal", healPct: 0.35 },
+		{ id: "mu2", name: "青帝长生咒", color: "#4ade80", desc: "生生不息，恢复 55% 气血", cost: 50, minRealm: 6, kind: "heal", healPct: 0.55 },
+	],
+	shui: [
+		{ id: "shui1", name: "玄水护幕", color: "#3b82f6", desc: "水幕护体，本回合受伤减半", cost: 20, minRealm: 3, kind: "shield", shieldMult: 0.5 },
+		{ id: "shui2", name: "沧海逆流", color: "#60a5fa", desc: "寒渊倒卷，造成 1.9× 攻击伤害", cost: 35, minRealm: 6, kind: "attack", mult: 1.9 },
+	],
+	huo: [
+		{ id: "huo1", name: "离火焚天", color: "#ef4444", desc: "离火燎原，造成 1.8× 攻击伤害", cost: 25, minRealm: 3, kind: "attack", mult: 1.8 },
+		{ id: "huo2", name: "九幽冥焰", color: "#f87171", desc: "焚神蚀骨，造成 2.8× 攻击伤害", cost: 45, minRealm: 6, kind: "attack", mult: 2.8 },
+	],
+	tu: [
+		{ id: "tu1", name: "后土屏障", color: "#a8a29e", desc: "大地为铠，本回合受伤 -65%", cost: 20, minRealm: 3, kind: "shield", shieldMult: 0.35 },
+		{ id: "tu2", name: "山岳镇封", color: "#d6d3d1", desc: "山岳压顶，造成 2.1× 攻击伤害", cost: 38, minRealm: 6, kind: "attack", mult: 2.1 },
+	],
+};
+
+/** 体质天赋：创角体质觉醒的独门术法（主动耗灵力，需金丹境起） */
+const PHYSIQUE_SKILLS: Record<string, SkillDef> = {
+	fantai: { id: "p_fantai", name: "凡血燃志", color: "#9ca3af", desc: "凡骨不屈，燃烧血气造成 2× 攻击伤害", cost: 30, minRealm: 4, kind: "attack", mult: 2 },
+	lingti: { id: "p_lingti", name: "清灵回潮", color: "#34d399", desc: "道体引灵，恢复 40% 气血", cost: 30, minRealm: 4, kind: "heal", healPct: 0.4 },
+	zhenwu: { id: "p_zhenwu", name: "玄金破军", color: "#ef4444", desc: "战体尽开，造成 2.6× 攻击伤害", cost: 40, minRealm: 4, kind: "attack", mult: 2.6 },
+	bingpo: { id: "p_bingpo", name: "寒渊冰封", color: "#7dd3fc", desc: "寒渊封脉，本回合受伤 -65%", cost: 30, minRealm: 4, kind: "shield", shieldMult: 0.35 },
+	senhai: { id: "p_senhai", name: "枯荣转轮", color: "#4ade80", desc: "枯荣流转，恢复 30% 气血", cost: 25, minRealm: 4, kind: "heal", healPct: 0.3 },
+	daoti: { id: "p_daoti", name: "太一神光", color: "#60a5fa", desc: "神光普照，造成 2.2× 攻击伤害", cost: 35, minRealm: 4, kind: "attack", mult: 2.2 },
+	wugou: { id: "p_wugou", name: "琉璃净界", color: "#67e8f9", desc: "净界展开，本回合受伤 -70%", cost: 35, minRealm: 4, kind: "shield", shieldMult: 0.3 },
+	wanyao: { id: "p_wanyao", name: "吞天噬地", color: "#dc2626", desc: "吞噬敌元，造成 1.8× 伤害并汲取 25% 气血", cost: 40, minRealm: 4, kind: "attack", mult: 1.8, healPct: 0.25 },
+	wangqing: { id: "p_wangqing", name: "忘情绝念", color: "#a5f3fc", desc: "绝念三息：三回合内敌方反击伤害减半", cost: 30, minRealm: 4, kind: "buff", turns: 3 },
+	chizi: { id: "p_chizi", name: "赤子真言", color: "#fca5a5", desc: "真言破邪，造成 2× 攻击伤害", cost: 30, minRealm: 4, kind: "attack", mult: 2 },
+	daotai: { id: "p_daotai", name: "混沌初开", color: "#fbbf24", desc: "混沌一击，造成 2.5× 攻击伤害", cost: 45, minRealm: 4, kind: "attack", mult: 2.5 },
+	zhizun: { id: "p_zhizun", name: "鸿蒙紫气斩", color: "#e879f9", desc: "紫气东来，造成 3× 攻击伤害", cost: 50, minRealm: 4, kind: "attack", mult: 3 },
+};
+
+// ==================== v12 真仙飞升 ====================
+
+/** 飞升门槛：渡劫境圆满（realmIndex === 11）方可问鼎真仙 */
+const ASCEND_REALM_IDX = 11;
+/** 飞升遗简：前人手泽，秘境古域中偶得，集齐三卷可推演天门所在 */
+const ASCEND_CLUES_NEED = 3;
+/** 大道守门使：镇守在登天台尽头的天界投影，斩杀后方可融合贯通 */
+const ASCEND_BOSS = { name: "大道守门使", title: "天界投影 · 镇守飞升之门" };
 
 // ==================== 坊市 ====================
 
@@ -725,6 +801,9 @@ function makeFreshPlayer(difficulty: Difficulty = "normal"): PlayerState {
 		bodyWound: 0,
 		scout: false,
 		fateCheat: false,
+		// v12 初始值
+		mp: 0,
+		ascend: { clues: 0, bossDefeated: false, ascended: false },
 	};
 	return fresh;
 }
@@ -928,12 +1007,35 @@ const GLOSSARY: { term: string; desc: string }[] = [
 	{ term: "定神", desc: "冲关前的小游戏：指针近中心时点下，每息至多 +4% 成功率，三息为限。" },
 	{ term: "命线已改", desc: "真仙秘术「小段命运篡改」之效：下次大境界突破无雷直过。" },
 	{ term: "福地", desc: "洞天福地，可升级。挂机产出修为灵石；3 级起灵泉滋养补寿元。" },
+	// v12
+	{ term: "灵力", desc: "蓝条。施放天赋技能所需；上限随境界与道侣提升。打坐与斗法回合回复。" },
+	{ term: "天赋技能", desc: "由灵根五行与先天体质觉醒的独门术法，斗法中消耗灵力施放。金系主杀、木系主愈、水系主守、火系主攻、土系主御；体质另有专属秘术。" },
+	{ term: "飞升遗简", desc: "前人手泽，藏天门星图。渡劫境于秘境古域偶得，集齐三卷可推演登天台所在。" },
+	{ term: "大道守门使", desc: "镇守飞升之门的天界投影。集齐三卷遗简后登上登天台挑战，斩杀后方可融合贯通。" },
+	{ term: "唯一真仙", desc: "融合贯通前人道果、斩杀守门使后所证。世间唯一真仙，不受寻常突破所限。" },
+	// 品级说明
+	{ term: "丹药品级", desc: "凡品 / 灵品 / 宝品 / 仙品 / 神品。品级越高效果越强、炼制成功率越低；神品为因果道具，仅坊市有售。" },
+	{ term: "法宝品级", desc: "凡品 / 灵品 / 宝器 / 仙器。品级越高基础属性越强，掉落越稀有；可强化至 +9。" },
+	{ term: "功法品级", desc: "凡品 / 灵品 / 宝品 / 天品。品阶随斗法进度递进，装备三槽提供永久被动。" },
 ];
 /** 按词条名取释义（模板 title 用） */
 function gloss(term: string): string {
 	return GLOSSARY.find((g) => g.term === term)?.desc ?? "";
 }
 let showGlossaryModal = $state(false);
+
+// ---- v12 真仙飞升 ----
+let showAscendModal = $state(false);
+/** 飞升之路各阶段状态文案 */
+const ascendStage = $derived(
+	player.ascend.ascended
+		? "done"
+		: player.ascend.bossDefeated
+			? "merge"
+			: player.ascend.clues >= ASCEND_CLUES_NEED
+				? "boss"
+				: "clue",
+);
 
 // ---- v10 心魔 / 丹毒 ----
 /** 心魔 debuff：≥50 突破 -10%；≥80 再 -10% */
@@ -1005,6 +1107,26 @@ const def = $derived(4 + currentRealm.level * 4 + (bodyManual?.defBonus ?? 0) + 
 const battlePower = $derived(Math.round(maxHp * 0.5 + atk * 4 + def * 3));
 const hpPercent = $derived(Math.max(0, Math.round((player.hp / maxHp) * 100)));
 
+// ---- v12 灵力（蓝条）与天赋技能 ----
+/** 灵力上限：基数 + 境界×8 + 道侣羁绊（好感 60+ 额外 +15） */
+const maxMp = $derived(MP_BASE + currentRealm.level * 8 + ((bestCompanion?.favor ?? 0) >= 60 ? 15 : 0));
+const mpPercent = $derived(maxMp > 0 ? Math.max(0, Math.min(100, Math.round((player.mp / maxMp) * 100))) : 0);
+
+/** 已觉醒技能：灵根五行技能（按灵根元素）+ 体质天赋（按先天体质），均需达到对应境界 */
+const unlockedSkills = $derived.by<SkillDef[]>(() => {
+	const list: SkillDef[] = [];
+	// 灵根元素技能（多条灵根可觉醒多系）
+	for (const rid of player.spiritualRoots) {
+		const pool = ELEMENT_SKILLS[rid];
+		if (pool) for (const s of pool) if (player.realmIndex >= s.minRealm) list.push(s);
+	}
+	// 体质天赋（唯一）
+	const ps = player.physique ? PHYSIQUE_SKILLS[player.physique] : undefined;
+	if (ps && player.realmIndex >= ps.minRealm) list.push(ps);
+	// 去重
+	return list.filter((v, i, a) => a.findIndex((x) => x.id === v.id) === i);
+});
+
 // ---- v10 六维战力面板（肉身/灵力/神魂/道韵/因果抗性/心魔抗性，0~1000）----
 /** 数值 → 0~1000 刻度（方块条按 10 格展示） */
 function clampDim(v: number): number {
@@ -1048,6 +1170,7 @@ const meditationPaused = $derived(
 		offlineReport !== null ||
 		showRebirthModal ||
 		showChoiceEvent !== null ||
+		showAscendModal ||
 		needCreation,
 );
 
@@ -1124,6 +1247,9 @@ function load() {
 				bodyWound: typeof data.bodyWound === "number" ? data.bodyWound : 0,
 				scout: Boolean(data.scout),
 				fateCheat: Boolean(data.fateCheat),
+				// v12 旧档兜底
+				mp: typeof data.mp === "number" ? data.mp : 0,
+				ascend: data.ascend && typeof data.ascend === "object" ? { clues: data.ascend.clues ?? 0, bossDefeated: Boolean(data.ascend.bossDefeated), ascended: Boolean(data.ascend.ascended) } : { clues: 0, bossDefeated: false, ascended: false },
 			};
 			// 突破后可能出现气血超上限（理论不会），兜底修正
 			player.hp = Math.min(player.hp, maxHp);
@@ -1164,6 +1290,10 @@ load();
 if (player.hp <= 0 || player.hp > maxHp) {
 	player.hp = maxHp;
 	save();
+}
+// v12 旧档灵力兜底：首次加载补满
+if (player.mp <= 0 || player.mp > maxMp) {
+	player.mp = maxMp;
 }
 
 // ==================== 通用工具 ====================
@@ -1246,6 +1376,7 @@ function checkNearDeath(cause: DeathCause): boolean {
 /** 死亡结算：记录本世修行总结并弹出结算弹窗（v11 一切归零，无跨世继承） */
 function die(cause: DeathCause) {
 	stopMeditation();
+	showAscendModal = false;
 	battle = null;
 	showThunderModal = false;
 	showBreakthroughModal = false;
@@ -1443,6 +1574,16 @@ function exploreSecret() {
 	const place = SECRET_PLACES[placeIdx];
 	const scouted = player.scout;
 	player.scout = false;
+
+	// v12 渡劫境专属机缘：秘境深处偶得「飞升遗简」（集齐三卷可推演天门所在）
+	if (player.realmIndex === ASCEND_REALM_IDX && !player.ascend.ascended && player.ascend.clues < ASCEND_CLUES_NEED && Math.random() < 0.22) {
+		player.ascend.clues += 1;
+		const left = ASCEND_CLUES_NEED - player.ascend.clues;
+		secretReport = `【${place}】你在一处坍塌的古修坐化台前，拾得一卷残破玉简——正是传说中的「飞升遗简」（${player.ascend.clues}/${ASCEND_CLUES_NEED}）！${left > 0 ? `简上星图残纹隐约指向天门所在，尚缺 ${left} 卷方可推演全貌。` : "三卷遗简终于集齐，登天台的位置已了然于胸——大道守门使正在彼处等你。"}`;
+		addLog(`飞升机缘 · 你在【${place}】拾得「飞升遗简」（${player.ascend.clues}/${ASCEND_CLUES_NEED}）。`, "success");
+		save();
+		return;
+	}
 
 	let roll = Math.random();
 	// 神识探查：将伏击重伤、空境等下下签替换为中上机缘
@@ -1980,6 +2121,7 @@ function confirmCreation() {
 	}
 	player.spiritualRoots = picked;
 	player.hp = maxHp;
+	player.mp = maxMp; // v12 创角灵力充盈
 
 	const rootNames = picked.map((id) => ROOT_ELEMENTS.find((e) => e.id === id)?.name).join("、");
 	addLog(
@@ -2856,6 +2998,8 @@ function breathTick() {
 
 	// 打坐同时疗伤：每息恢复 3% 上限气血；冷却递减
 	if (player.hp < maxHp) healHp(maxHp * 0.03);
+	// v12 打坐回灵：每息恢复 12% 灵力上限
+	if (player.mp < maxMp) player.mp = Math.min(maxMp, player.mp + Math.max(1, Math.round(maxMp * 0.12)));
 	for (const id of Object.keys(player.cooldowns)) {
 		if (player.cooldowns[id] > 0) player.cooldowns[id] -= 1;
 	}
@@ -2964,6 +3108,7 @@ function portal(node: HTMLElement) {
 			showBreakthroughModal ||
 			battle !== null ||
 			saveModalMode !== null ||
+			showAscendModal ||
 			enhanceId !== null ||
 			offlineReport !== null ||
 			showRebirthModal
@@ -3221,6 +3366,9 @@ function startBattle(tpl: EnemyTemplate, index: number) {
 		equipName: null,
 		stunned: false,
 		killUsed: false,
+		shieldTurns: 0,
+		shieldMult: 1,
+		buffTurns: 0,
 	};
 	battlePushLog(`你登台对阵「${tpl.name}」（战力 ${enemy.power}），战斗开始！`, "warning");
 }
@@ -3235,21 +3383,36 @@ function enemyStrikeBack(): boolean {
 		b.rounds += 1;
 		return false;
 	}
-	const dmg = rollEnemyDamage(b.eatk);
+	const rawDmg = rollEnemyDamage(b.eatk);
+	// v12 护盾减伤（本回合）
+	let dmg = rawDmg;
+	if (b.shieldTurns > 0) {
+		dmg = Math.round(rawDmg * b.shieldMult);
+		b.shieldTurns -= 1;
+		battlePushLog(`「${b.enemyName}」反扑被你的护盾拦下大半，仅受 ${dmg} 点伤害。`, "success");
+	}
+	// v12 增益减伤（期间敌方反击减半）
+	if (b.buffTurns > 0) {
+		dmg = Math.round(dmg * 0.5);
+		b.buffTurns -= 1;
+	}
 	// v10.1 闪避：概率完全躲过这一击
 	if (Math.random() < dodgeRate / 100) {
 		battlePushLog(`「${b.enemyName}」反扑而来，你身形一晃堪堪避过，毫发无伤！`, "success");
 		b.rounds += 1;
+		// v12 回合结束回复少量灵力
+		player.mp = Math.min(maxMp, player.mp + 8);
 		return false;
 	}
 	player.hp = Math.max(0, player.hp - dmg);
-	battlePushLog(`「${b.enemyName}」反扑，你失去 ${dmg} 点气血。`, "danger");
+	if (dmg > 0) battlePushLog(`「${b.enemyName}」反扑，你失去 ${dmg} 点气血。`, "danger");
 	if (player.hp <= 0) {
-		if (b.source === "tower") finishTowerLose();
-		else finishBattleLose();
+		finishLoseBySource();
 		return true;
 	}
 	b.rounds += 1;
+	// v12 回合结束回复少量灵力
+	player.mp = Math.min(maxMp, player.mp + 8);
 	return false;
 }
 
@@ -3261,12 +3424,7 @@ function battleAttack() {
 	b.ehp = Math.max(0, b.ehp - dmg);
 	battlePushLog(`第 ${b.rounds} 合 · 你运剑猛攻，对「${b.enemyName}」造成 ${dmg} 点伤害。`);
 	if (b.ehp <= 0) {
-		if (b.source === "tower") {
-			finishTowerWin();
-		} else {
-			const tpl = ENEMY_TEMPLATES.find((t) => t.id === b.tplId);
-			if (tpl) finishBattleWin(tpl);
-		}
+		finishWinBySource();
 		return;
 	}
 	enemyStrikeBack();
@@ -3303,8 +3461,7 @@ function battleRetreat() {
 		b.rounds += 1;
 		if (player.hp <= 0) {
 			save();
-			if (b.source === "tower") finishTowerLose();
-			else finishBattleLose();
+			finishLoseBySource();
 			return;
 		}
 	}
@@ -3320,11 +3477,7 @@ function battleTalismanStrike() {
 	b.ehp = Math.max(0, b.ehp - dmg);
 	battlePushLog(`你甩出一张五雷符，紫雷贯顶，对「${b.enemyName}」造成 ${dmg} 点固定伤害！`, "success");
 	if (b.ehp <= 0) {
-		if (b.source === "tower") finishTowerWin();
-		else {
-			const tpl = ENEMY_TEMPLATES.find((t) => t.id === b.tplId);
-			if (tpl) finishBattleWin(tpl);
-		}
+		finishWinBySource();
 		return;
 	}
 	if (!enemyStrikeBack()) save();
@@ -3354,11 +3507,56 @@ function battleKillMove() {
 	addBodyWound(18);
 	battlePushLog(`躯府三虫齐鸣，道衍杀招「万灵噬天」发动，造成 ${dmg} 点伤害！反噬令你损失 ${backlash} 气血。`, "danger");
 	if (b.ehp <= 0) {
-		if (b.source === "tower") finishTowerWin();
-		else {
-			const tpl = ENEMY_TEMPLATES.find((t) => t.id === b.tplId);
-			if (tpl) finishBattleWin(tpl);
+		finishWinBySource();
+		return;
+	}
+	if (!enemyStrikeBack()) save();
+}
+
+/** v12 施放天赋技能：消耗灵力，效果按技能类型结算；占用一回合（敌方照常反击） */
+function battleSkill(skill: SkillDef) {
+	const b = battle;
+	if (!b || b.status !== "fighting") return;
+	if (player.mp < skill.cost) {
+		battlePushLog("灵力不足，无法施放此术——打坐或回合回复可积蓄灵力。", "warning");
+		return;
+	}
+	player.mp -= skill.cost;
+
+	// 增益/护盾类先行结算，不占伤害回合
+	if (skill.kind === "shield") {
+		b.shieldTurns = 1;
+		b.shieldMult = skill.shieldMult ?? 0.5;
+		battlePushLog(`你掐诀展开「${skill.name}」，灵光护体，本回合受伤大幅减轻！`, "success");
+		if (!enemyStrikeBack()) save();
+		return;
+	}
+	if (skill.kind === "buff") {
+		b.buffTurns = skill.turns ?? 2;
+		battlePushLog(`你施展「${skill.name}」，道韵缭绕，接下来 ${b.buffTurns} 回合敌方反击减半！`, "success");
+		if (!enemyStrikeBack()) save();
+		return;
+	}
+
+	// 攻击 / 治疗类
+	if (skill.kind === "attack") {
+		const dmg = Math.round(atk * (skill.mult ?? 1.5));
+		b.ehp = Math.max(0, b.ehp - dmg);
+		battlePushLog(`你催动「${skill.name}」，灵光暴涨，对「${b.enemyName}」造成 ${dmg} 点伤害！`, "success");
+		if (skill.healPct) {
+			const heal = Math.round(maxHp * skill.healPct);
+			healHp(heal);
+			battlePushLog(`术法反哺，你恢复 ${heal} 点气血。`, "success");
 		}
+	} else if (skill.kind === "heal") {
+		const heal = Math.round(maxHp * (skill.healPct ?? 0.3));
+		const before = player.hp;
+		healHp(heal);
+		battlePushLog(`你施展「${skill.name}」，伤势尽愈，恢复 ${player.hp - before} 点气血。`, "success");
+	}
+
+	if (b.ehp <= 0) {
+		finishWinBySource();
 		return;
 	}
 	if (!enemyStrikeBack()) save();
@@ -3536,8 +3734,126 @@ function startTowerBattle() {
 		equipName: null,
 		stunned: false,
 		killUsed: false,
+		shieldTurns: 0,
+		shieldMult: 1,
+		buffTurns: 0,
 	};
 	battlePushLog(`你踏入试炼塔第 ${n} 层，守将现身（战力 ${e.power}）！`, "warning");
+}
+
+// ==================== v12 真仙飞升 · 登天台 ====================
+
+/** 大道守门使属性：以玩家当前战力 ×1.6 投影生成（无法以符咒取巧，唯力破之） */
+function ascendBossStats() {
+	const hp = Math.round(maxHp * 2.4);
+	const eatk = Math.round(atk * 1.35);
+	const edef = Math.round(def * 1.3);
+	return { hp, atk: eatk, def: edef, power: Math.round(hp * 0.5 + eatk * 4 + edef * 3) };
+}
+
+/** 挑战守门使：三卷遗简集齐后方可登门 */
+function startAscendBoss() {
+	if (battle) return;
+	if (player.ascend.clues < ASCEND_CLUES_NEED || player.ascend.bossDefeated || player.ascend.ascended) return;
+	if (player.hp < maxHp * MIN_HP_RATIO) {
+		addLog("气血不足三成，登天台与送死何异？先疗伤。", "warning");
+		return;
+	}
+	showAscendModal = false;
+	const e = ascendBossStats();
+	addLifespan(-2);
+	if (showRebirthModal) return;
+	battle = {
+		tplId: "ascend",
+		source: "ascend",
+		towerN: 0,
+		enemyName: ASCEND_BOSS.name,
+		enemyTitle: ASCEND_BOSS.title,
+		ehp: e.hp,
+		ehpMax: e.hp,
+		eatk: e.atk,
+		edef: e.def,
+		epower: e.power,
+		rounds: 1,
+		logs: [],
+		status: "fighting",
+		reward: 0,
+		firstClear: false,
+		manualName: null,
+		pillName: null,
+		stoneGain: 0,
+		equipName: null,
+		stunned: false,
+		killUsed: false,
+		shieldTurns: 0,
+		shieldMult: 1,
+		buffTurns: 0,
+	};
+	battlePushLog(`你拾级登上登天台，天门之前，「${ASCEND_BOSS.name}」执戟而立（战力 ${e.power}）——飞升与否，一战定之！`, "warning");
+}
+
+/** 败于守门使：投影反噬，重伤退回，无修为损失（飞升之战，败者不辱） */
+function finishAscendLose() {
+	const b = battle;
+	if (!b) return;
+	b.status = "lose";
+	b.reward = 0;
+	player.hp = Math.max(1, Math.round(maxHp * 0.15));
+	addDemon(8);
+	battlePushLog("守门使一戟将你扫落登天台，天门重归沉寂——养好伤势，再来问鼎。", "danger");
+	addLog("飞升 · 你不敌大道守门使，被扫落登天台，所幸投影未下杀手。", "danger");
+	save();
+}
+
+/** 按敌人来源结算胜利（斗法台 / 试炼塔 / 飞升守门使） */
+function finishWinBySource() {
+	const b = battle;
+	if (!b) return;
+	if (b.source === "tower") finishTowerWin();
+	else if (b.source === "ascend") finishAscendWin();
+	else {
+		const tpl = ENEMY_TEMPLATES.find((t) => t.id === b.tplId);
+		if (tpl) finishBattleWin(tpl);
+	}
+}
+
+/** 按敌人来源结算败北 */
+function finishLoseBySource() {
+	const b = battle;
+	if (!b) return;
+	if (b.source === "tower") finishTowerLose();
+	else if (b.source === "ascend") finishAscendLose();
+	else finishBattleLose();
+}
+
+/** 斩杀守门使：飞升之路最后一关已过 */
+function finishAscendWin() {
+	const b = battle;
+	if (!b) return;
+	player.ascend.bossDefeated = true;
+	player.battlesWon += 1;
+	b.reward = 0;
+	b.status = "win";
+	battlePushLog(`守门使的投影寸寸碎裂，天门缓缓开启——飞升之路，已无人可挡！`, "success");
+	addLog("飞升 · 你斩杀了大道守门使，天门洞开，只待融合贯通！", "success");
+	save();
+}
+
+/** 融合贯通：斩守门使后，三卷遗简合一，成为世间唯一真仙 */
+function ascendMerge() {
+	if (!player.ascend.bossDefeated || player.ascend.ascended) return;
+	if (player.realmIndex !== ASCEND_REALM_IDX) return;
+	player.ascend.ascended = true;
+	showAscendModal = false;
+	// 融合贯通：直接晋入真仙境，气血灵力回满，天地共鸣
+	player.realmIndex = 12;
+	player.lastBreakthrough = new Date().toLocaleString("zh-CN");
+	player.hp = maxHp;
+	player.mp = maxMp;
+	xpCapWarned = false;
+	addLog("三卷飞升遗简在你掌心合一，化作流光没入眉心。你融合贯通前人道果，一举冲破天地桎梏——自此，你是世间唯一的真仙！", "success");
+	addLog("天地同贺：万灵俯首，霞光三万里。真仙之躯，与天地同寿。", "success");
+	save();
 }
 
 /** 试炼胜利：层数+1、灵石 60+20×N、小额修为；每 5 层保底掉法宝（至少灵品）；冷却独立 5 息 */
@@ -3673,6 +3989,9 @@ function doImport() {
 		bodyWound: typeof data.bodyWound === "number" ? data.bodyWound : 0,
 		scout: Boolean(data.scout),
 		fateCheat: Boolean(data.fateCheat),
+		// v12 旧档兜底
+		mp: typeof data.mp === "number" ? data.mp : 0,
+		ascend: data.ascend && typeof data.ascend === "object" ? { clues: data.ascend.clues ?? 0, bossDefeated: Boolean(data.ascend.bossDefeated), ascended: Boolean(data.ascend.ascended) } : { clues: 0, bossDefeated: false, ascended: false },
 	};
 	// 气血兜底：炼体功法/淬体丹变化后可能超上限
 	player.hp = Math.max(0, Math.min(player.hp ?? maxHp, maxHp));
@@ -3781,6 +4100,13 @@ function doBreakthroughCheck(rate: number) {
 
 function attemptBreakthrough() {
 	if (!canBreakthrough || !nextRealm) return;
+
+	// v12 真仙境不可寻常突破：需集齐三卷飞升遗简、斩守门使，融合贯通后方成唯一真仙
+	if (nextRealm.level === 13 && !player.ascend.ascended) {
+		showAscendModal = true;
+		return;
+	}
+
 	lastSuccessRate = successRate;
 
 	if (nextRealm.thunderTrial) {
@@ -4113,6 +4439,16 @@ function closeModal() {
 						<div class="hp-fill lifespan-fill" class:old-fill={lifespanRatio < 0.3} class:candle-fill={lifespanRatio < 0.1} style="width: {Math.round(lifespanRatio * 100)}%"></div>
 					</div>
 				</div>
+				<!-- v12 灵力条（蓝条） -->
+				<div class="hp-block mp-block">
+					<div class="stat-label">
+						<span title={gloss("灵力")}>灵力</span>
+						<span class="mp-text">{Math.round(player.mp)} / {maxMp}（{mpPercent}%）</span>
+					</div>
+					<div class="hp-bar">
+						<div class="hp-fill mp-fill" style="width: {mpPercent}%"></div>
+					</div>
+				</div>
 				<div class="stat-grid">
 					<div class="stat-cell"><span class="stat-num">{atk}</span><span class="stat-key">攻击</span></div>
 					<div class="stat-cell"><span class="stat-num">{def}</span><span class="stat-key">防御</span></div>
@@ -4195,16 +4531,21 @@ function closeModal() {
 			</div>
 			</div>
 
-			{#if canBreakthrough}
-				<button class="btn breakthrough-btn" onclick={attemptBreakthrough}>
-					{nextRealm.thunderTrial ? "渡劫突破" : "尝试突破"} → {nextRealm.name}（成功率 {(successRate * 100).toFixed(0)}%{player.pojingActive ? " · 破境丹已备" : ""}）
-				</button>
-				{#if nextRealm.thunderTrial}
-					<p class="thunder-hint">大境界突破需硬渡三道天雷，每道失败损修为气血并削弱突破之势；破境丹可祭出抵挡一道。</p>
+			{#if nextRealm && nextRealm.level === 13}
+					<button class="btn breakthrough-btn ascend-entry-btn" onclick={() => (showAscendModal = true)}>
+						追寻真仙大道 · 三重天道试炼
+					</button>
+					<p class="thunder-hint">真仙不可寻常突破。集齐飞升遗简（秘境偶得）、斩杀大道守门使、融合贯通——你将成为世间唯一真仙。</p>
+				{:else if canBreakthrough}
+					<button class="btn breakthrough-btn" onclick={attemptBreakthrough}>
+						{nextRealm.thunderTrial ? "渡劫突破" : "尝试突破"} → {nextRealm.name}（成功率 {(successRate * 100).toFixed(0)}%{player.pojingActive ? " · 破境丹已备" : ""}）
+					</button>
+					{#if nextRealm.thunderTrial}
+						<p class="thunder-hint">大境界突破需硬渡三道天雷，每道失败损修为气血并削弱突破之势；破境丹可祭出抵挡一道。</p>
+					{/if}
+				{:else if nextRealm}
+					<div class="breakthrough-hint">距「{nextRealm.name}」还需 {(nextRealm.requiredXp - player.xp).toLocaleString()} 点修为</div>
 				{/if}
-			{:else if nextRealm}
-				<div class="breakthrough-hint">距「{nextRealm.name}」还需 {(nextRealm.requiredXp - player.xp).toLocaleString()} 点修为</div>
-			{/if}
 
 			<div class="stats">
 			<span>累计吐纳: {player.totalBreaths} 息</span>
@@ -4817,6 +5158,55 @@ function closeModal() {
 		</div>
 	{/if}
 
+	<!-- ========== v12 真仙飞升弹窗 ========== -->
+	{#if showAscendModal}
+		<div class="modal-overlay" use:portal onclick={() => (showAscendModal = false)}>
+			<div class="modal-content ascend-modal" onclick={(e) => e.stopPropagation()}>
+				<h3 class="ascend-title">真仙飞升 · 天道三重试炼</h3>
+				<p class="desc">真仙不可寻常突破——你需完成三重试炼，方能破碎虚空、成为世间唯一真仙。</p>
+
+				<div class="ascend-steps">
+					<!-- 第一重：飞升遗简 -->
+					<div class="ascend-step" class:done={player.ascend.clues >= ASCEND_CLUES_NEED}>
+						<div class="step-num">一</div>
+						<div class="step-info">
+							<div class="step-name">飞升遗简 · {player.ascend.clues}/{ASCEND_CLUES_NEED}</div>
+							<div class="step-desc">前人手泽，藏天门星图。渡劫境探索秘境古域可偶得（22% 概率）。</div>
+						</div>
+					</div>
+					<!-- 第二重：大道守门使 -->
+					<div class="ascend-step" class:done={player.ascend.bossDefeated} class:locked={player.ascend.clues < ASCEND_CLUES_NEED}>
+						<div class="step-num">二</div>
+						<div class="step-info">
+							<div class="step-name">斩杀大道守门使</div>
+							<div class="step-desc">集齐三卷遗简后登上登天台，击败镇守天门的天界投影（无法取巧，唯力破之）。</div>
+						</div>
+					</div>
+					<!-- 第三重：融合贯通 -->
+					<div class="ascend-step" class:done={player.ascend.ascended} class:locked={!player.ascend.bossDefeated}>
+						<div class="step-num">三</div>
+						<div class="step-info">
+							<div class="step-name">融合贯通 · 唯一真仙</div>
+							<div class="step-desc">三卷遗简合一，融合前人道果，冲破天地桎梏，证道真仙。</div>
+						</div>
+					</div>
+				</div>
+
+				<div class="ascend-actions">
+					{#if player.ascend.clues >= ASCEND_CLUES_NEED && !player.ascend.bossDefeated}
+						<button class="btn ascend-btn-fight" onclick={startAscendBoss}>登上登天台 · 挑战守门使</button>
+					{:else if player.ascend.bossDefeated && !player.ascend.ascended}
+						<button class="btn ascend-btn-merge" onclick={ascendMerge}>融合贯通 · 证道真仙</button>
+					{:else if player.ascend.ascended}
+						<p class="ascend-done">你已融合贯通，成为这世间唯一的真仙。万灵俯首，霞光三万里。</p>
+					{:else}
+						<button class="btn" onclick={() => (showAscendModal = false)}>继续游历</button>
+					{/if}
+				</div>
+			</div>
+		</div>
+	{/if}
+
 	<!-- ========== 交互式斗法弹窗 ========== -->
 	{#if battle}
 		{@const myPct = Math.max(0, Math.round((player.hp / maxHp) * 100))}
@@ -4829,7 +5219,7 @@ function closeModal() {
 			}}
 		>
 			<div class="modal-content battle-modal" onclick={(e) => e.stopPropagation()}>
-				<h3 class="battle-title">斗法台 · 第 {battle.rounds} 合</h3>
+				<h3 class="battle-title">{battle.source === "ascend" ? "登天台" : battle.source === "tower" ? "试炼塔" : "斗法台"} · 第 {battle.rounds} 合</h3>
 
 				<!-- 敌方 -->
 				<div class="battle-side enemy-side">
@@ -4844,16 +5234,21 @@ function closeModal() {
 				</div>
 
 				<!-- 我方 -->
-				<div class="battle-side">
-					<div class="stat-label">
-						<span>你 · {currentRealm.name}修士</span>
-						<span>战力 {battlePower.toLocaleString()}</span>
+					<div class="battle-side">
+						<div class="stat-label">
+							<span>你 · {currentRealm.name}修士</span>
+							<span>战力 {battlePower.toLocaleString()}</span>
+						</div>
+						<div class="hp-bar">
+							<div class="hp-fill" class:hp-low-fill={myPct < 30} style="width: {myPct}%"></div>
+						</div>
+						<div class="battle-hp-text">{Math.round(player.hp)} / {maxHp}（{myPct}%）</div>
+						<!-- v12 灵力条 -->
+						<div class="hp-bar mp-bar-sm">
+							<div class="hp-fill mp-fill" style="width: {mpPercent}%"></div>
+						</div>
+						<div class="battle-hp-text mp-text-sm">灵力 {Math.round(player.mp)} / {maxMp}</div>
 					</div>
-					<div class="hp-bar">
-						<div class="hp-fill" class:hp-low-fill={myPct < 30} style="width: {myPct}%"></div>
-					</div>
-					<div class="battle-hp-text">{Math.round(player.hp)} / {maxHp}（{myPct}%）</div>
-				</div>
 
 				<!-- 回合播报 -->
 				<div class="battle-log">
@@ -4887,27 +5282,55 @@ function closeModal() {
 							道衍杀招
 						</button>
 					</div>
-					<p class="battle-tip">攻击或服丹后敌方立即反击；五雷符三倍攻伤、镇妖符封敌一合，均占用一回合。</p>
+					<!-- v12 天赋技能（灵根/体质觉醒，消耗灵力） -->
+					{#if unlockedSkills.length > 0}
+						<div class="battle-actions battle-skill-row">
+							{#each unlockedSkills as s (s.id)}
+								<button
+									class="btn battle-btn-skill"
+									style={`border-color: ${s.color}; color: ${s.color}`}
+									disabled={player.mp < s.cost}
+									title={`${s.desc}（耗灵 ${s.cost}）`}
+									onclick={() => battleSkill(s)}
+								>
+									{s.name} · {s.cost}
+								</button>
+							{/each}
+						</div>
+					{/if}
+					<p class="battle-tip">攻击或施术后敌方立即反击；天赋技能消耗灵力，护盾/增益可减伤，五行各擅胜场。</p>
 				{:else if battle.status === "win"}
 					<div class="battle-result result-win">
 						<div class="icon">胜</div>
 						<p>
-							{battle.source === "tower"
-								? `攻破第 ${battle.towerN} 层！获得 ${battle.reward.toLocaleString()} 修为、${battle.stoneGain.toLocaleString()} 灵石`
-								: `${battle.firstClear ? "首通大捷！" : "斗法获胜！"} 获得 ${battle.reward.toLocaleString()} 修为、${battle.stoneGain.toLocaleString()} 灵石${battle.pillName ? `，另缴获一颗${battle.pillName}` : ""}${battle.manualName ? `，夺得失传秘籍《${battle.manualName}》` : ""}`}
-							{battle.equipName ? `，拾得法宝「${battle.equipName}」` : ""}
-						</p>
-						<button class="btn" onclick={closeBattle}>收下战果</button>
+								{#if battle.source === "ascend"}
+									天门洞开！守门使的投影寸寸碎裂——飞升之路已无人可挡。回到飞升面板，点击「融合贯通」证道真仙。
+								{:else if battle.source === "tower"}
+									攻破第 {battle.towerN} 层！获得 {battle.reward.toLocaleString()} 修为、{battle.stoneGain.toLocaleString()} 灵石
+								{:else}
+									{battle.firstClear ? "首通大捷！" : "斗法获胜！"} 获得 {battle.reward.toLocaleString()} 修为、{battle.stoneGain.toLocaleString()} 灵石{battle.pillName ? `，另缴获一颗${battle.pillName}` : ""}{battle.manualName ? `，夺得失传秘籍《${battle.manualName}》` : ""}
+								{/if}
+								{battle.equipName ? `，拾得法宝「${battle.equipName}」` : ""}
+							</p>
+							<button class="btn" onclick={closeBattle}>
+								{battle.source === "ascend" ? "凝视天门" : "收下战果"}
+							</button>
 					</div>
 				{:else if battle.status === "lose"}
 					<div class="battle-result result-lose">
 						<div class="icon">败</div>
 						<p>
-							{battle.source === "tower"
-								? "试炼失败，并无折损，气血见底。疗伤后可随时再试。"
-								: `力竭败退，损失 ${battle.reward.toLocaleString()} 修为，气血见底。回打坐或回春丹疗伤后再战。`}
-						</p>
-						<button class="btn" onclick={closeBattle}>黯然下台</button>
+								{#if battle.source === "ascend"}
+									守门使一戟将你扫落登天台，天门重归沉寂。养好伤势，再来问鼎。
+								{:else if battle.source === "tower"}
+									试炼失败，并无折损，气血见底。疗伤后可随时再试。
+								{:else}
+									力竭败退，损失 {battle.reward.toLocaleString()} 修为，气血见底。回打坐或回春丹疗伤后再战。
+								{/if}
+							</p>
+							<button class="btn" onclick={closeBattle}>
+								{battle.source === "ascend" ? "退回登天台" : "黯然下台"}
+							</button>
 					</div>
 				{:else}
 					<div class="battle-result result-retreat">
@@ -5223,6 +5646,18 @@ function closeModal() {
 .stat-power .stat-num { color: #fbbf24; }
 .stat-key { font-size: 0.72rem; color: var(--content-meta, #9ca3af); }
 
+/* ===== v12 灵力条（蓝条） ===== */
+.mp-block { margin-bottom: 0; }
+.mp-text { color: #7dd3fc; font-size: 0.8rem; font-weight: 600; }
+.mp-fill {
+	height: 100%; border-radius: 999px;
+	background: linear-gradient(90deg, #0284c7, #38bdf8, #7dd3fc);
+	transition: width 0.4s ease;
+	box-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+}
+.mp-bar-sm { height: 0.4rem; margin-top: 0.3rem; }
+.mp-text-sm { color: #7dd3fc; font-size: 0.75rem; margin-top: 0.15rem; }
+
 /* ===== 打坐 ===== */
 .meditation-panel {
 	display: flex; align-items: center; gap: 1rem;
@@ -5424,7 +5859,7 @@ button.manual-chip.owned:hover { border-color: rgba(99, 102, 241, 0.6); transfor
 
 /* ===== 弹窗 ===== */
 .modal-overlay {
-	position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
+	position: fixed; inset: 0; background: rgba(0, 0, 0, 0.7);
 	display: flex; align-items: center; justify-content: center; z-index: 9999;
 }
 .modal-content {
@@ -5434,6 +5869,11 @@ button.manual-chip.owned:hover { border-color: rgba(99, 102, 241, 0.6); transfor
 	color: #e8edf7;
 	border-radius: 1rem; padding: 2rem; max-width: 26rem; width: calc(100% - 3rem); text-align: center;
 	max-height: calc(100vh - 4rem); overflow-y: auto;
+	/* v12 抗模糊：强制亚像素渲染 + 关闭抗锯齿柔化 */
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	text-rendering: optimizeLegibility;
+	transform: translateZ(0);
 }
 .breakthrough-loading .spinner {
 	width: 2.5rem; height: 2.5rem;
@@ -5467,6 +5907,37 @@ button.manual-chip.owned:hover { border-color: rgba(99, 102, 241, 0.6); transfor
 .glossary-modal { text-align: left; }
 .glossary-list { display: flex; flex-direction: column; gap: 0.45rem; margin: 0.6rem 0 1rem; }
 .glossary-item { display: flex; flex-direction: column; gap: 0.1rem; padding-bottom: 0.45rem; border-bottom: 1px dashed rgba(148, 163, 184, 0.2); }
+
+/* ===== v12 真仙飞升弹窗 ===== */
+.ascend-modal { max-width: 30rem; text-align: left; }
+.ascend-title { margin: 0 0 0.35rem; font-size: 1.15rem; font-weight: 800; color: #fbbf24; text-align: center; }
+.ascend-steps { display: flex; flex-direction: column; gap: 0.65rem; margin: 1rem 0; }
+.ascend-step {
+	display: flex; gap: 0.7rem; align-items: flex-start;
+	padding: 0.6rem 0.75rem; border-radius: 0.6rem;
+	background: rgba(128, 128, 128, 0.08); border: 1px solid rgba(148, 163, 184, 0.15);
+	transition: all 0.2s;
+}
+.ascend-step.done { background: rgba(52, 211, 153, 0.12); border-color: rgba(52, 211, 153, 0.4); }
+.ascend-step.locked { opacity: 0.45; }
+.step-num {
+	flex-shrink: 0; width: 1.6rem; height: 1.6rem; border-radius: 50%;
+	display: flex; align-items: center; justify-content: center;
+	background: rgba(251, 191, 36, 0.2); color: #fbbf24; font-weight: 800; font-size: 0.85rem;
+}
+.ascend-step.done .step-num { background: #34d399; color: #052e16; }
+.step-info { flex: 1; min-width: 0; }
+.step-name { font-weight: 700; font-size: 0.9rem; margin-bottom: 0.15rem; color: #e8edf7; }
+.step-desc { font-size: 0.78rem; color: #94a3b8; line-height: 1.45; }
+.ascend-actions { display: flex; justify-content: center; margin-top: 0.5rem; }
+.ascend-btn-fight { background: linear-gradient(90deg, #dc2626, #ef4444); padding: 0.6rem 1.4rem; font-weight: 700; }
+.ascend-btn-merge { background: linear-gradient(90deg, #fbbf24, #f59e0b); color: #451a03; padding: 0.6rem 1.4rem; font-weight: 800; }
+.ascend-done { text-align: center; color: #fbbf24; font-size: 0.9rem; line-height: 1.6; margin: 0.5rem 0 0; }
+
+/* ===== v12 战斗技能行 ===== */
+.battle-skill-row { margin-top: 0.5rem; }
+.battle-btn-skill { border: 1.5px solid; background: rgba(128, 128, 128, 0.06); font-size: 0.78rem; padding: 0.3rem 0.6rem; }
+.battle-btn-skill:disabled { opacity: 0.4; border-color: #6b7280; color: #6b7280; }
 .glossary-term { font-weight: 700; color: #a5b4fc; font-size: 0.85rem; }
 .glossary-desc { font-size: 0.78rem; color: #bcc8de; line-height: 1.5; }
 
