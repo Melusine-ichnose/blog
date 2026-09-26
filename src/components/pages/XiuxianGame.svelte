@@ -754,6 +754,17 @@ let deathCause = $state<DeathCause | null>(null);
 let rebirthReport = $state<{ shards: number; cause: DeathCause } | null>(null);
 let showRebirthShop = $state(false);
 
+// ==================== v10.2 游戏内功能菜单（分页切换，压缩页面长度）====================
+type GameMenuId = "battle" | "worm" | "fate" | "pill" | "log";
+const MENUS: { id: GameMenuId; name: string }[] = [
+	{ id: "battle", name: "斗法备战" },
+	{ id: "worm", name: "虫府福地" },
+	{ id: "fate", name: "仙缘因果" },
+	{ id: "pill", name: "炼丹坊市" },
+	{ id: "log", name: "修炼日志" },
+];
+let activeMenu = $state<GameMenuId>("battle");
+
 // ==================== 属性计算 ====================
 
 const currentRealm = $derived(REALMS[player.realmIndex]);
@@ -3372,7 +3383,15 @@ function closeModal() {
 		</div>
 		</div>
 
-		<!-- ========== 斗法台 ========== -->
+		<!-- v10.2 游戏内菜单：主修炼卡常驻，其余系统分页切换，买丹斗法无需长滑 -->
+	<div class="game-menu">
+		{#each MENUS as m (m.id)}
+			<button class="game-menu-btn" class:on={activeMenu === m.id} onclick={() => (activeMenu = m.id)}>{m.name}</button>
+		{/each}
+	</div>
+
+	{#if activeMenu === "battle"}
+	<!-- ========== 斗法台 ========== -->
 		<div class="arena-card">
 			<div class="pill-header">
 				<h3 class="pill-title">斗法台</h3>
@@ -3527,6 +3546,34 @@ function closeModal() {
 		{/each}
 	</div>
 
+		<!-- ========== v10 符咒 ========== -->
+		<div class="pill-card">
+			<div class="pill-header">
+				<h3 class="pill-title">符咒 · 符箓阁</h3>
+				<span class="pill-subtitle">灵石请符 · 战斗/渡劫时催动，替死符为被动保命法器</span>
+			</div>
+			<div class="pill-list">
+				{#each TALISMANS as t (t.id)}
+					{@const locked = player.realmIndex < t.minRealm}
+					{@const afford = player.stones >= t.price}
+					<div class="pill-item" class:pill-locked={locked}>
+						<span class="pill-orb" style={`background: radial-gradient(circle at 35% 30%, ${t.color}, ${t.color}88)`}></span>
+						<div class="pill-info">
+							<div class="pill-name">{t.name} <span class="pill-count">×{player.talismans[t.id]}</span></div>
+							<div class="pill-desc">{locked ? `需达「${REALMS[t.minRealm].name}」方可请符` : t.desc}</div>
+						</div>
+						<div class="pill-actions">
+							{#if t.id === "clear"}
+								<button class="btn pill-use" disabled={player.talismans.clear <= 0} onclick={() => useTalismanOutOfBattle(t)}>焚符</button>
+							{/if}
+							<button class="btn pill-buy" disabled={locked || !afford} onclick={() => buyTalisman(t)}>请符 {t.price}</button>
+						</div>
+					</div>
+				{/each}
+			</div>
+		</div>
+
+		{:else if activeMenu === "worm"}
 		<!-- ========== v10 躯府 · 灵虫 ========== -->
 		<div class="pill-card">
 			<div class="pill-header">
@@ -3581,34 +3628,7 @@ function closeModal() {
 			</div>
 		</div>
 
-		<!-- ========== v10 符咒 ========== -->
-		<div class="pill-card">
-			<div class="pill-header">
-				<h3 class="pill-title">符咒 · 符箓阁</h3>
-				<span class="pill-subtitle">灵石请符 · 战斗/渡劫时催动，替死符为被动保命法器</span>
-			</div>
-			<div class="pill-list">
-				{#each TALISMANS as t (t.id)}
-					{@const locked = player.realmIndex < t.minRealm}
-					{@const afford = player.stones >= t.price}
-					<div class="pill-item" class:pill-locked={locked}>
-						<span class="pill-orb" style={`background: radial-gradient(circle at 35% 30%, ${t.color}, ${t.color}88)`}></span>
-						<div class="pill-info">
-							<div class="pill-name">{t.name} <span class="pill-count">×{player.talismans[t.id]}</span></div>
-							<div class="pill-desc">{locked ? `需达「${REALMS[t.minRealm].name}」方可请符` : t.desc}</div>
-						</div>
-						<div class="pill-actions">
-							{#if t.id === "clear"}
-								<button class="btn pill-use" disabled={player.talismans.clear <= 0} onclick={() => useTalismanOutOfBattle(t)}>焚符</button>
-							{/if}
-							<button class="btn pill-buy" disabled={locked || !afford} onclick={() => buyTalisman(t)}>请符 {t.price}</button>
-						</div>
-					</div>
-				{/each}
-			</div>
-		</div>
-
-		<!-- ========== v10 福地 · 秘境 ========== -->
+	<!-- ========== v10 福地 · 秘境 ========== -->
 		<div class="pill-card">
 			<div class="pill-header">
 				<h3 class="pill-title">福地 · 秘境</h3>
@@ -3647,7 +3667,8 @@ function closeModal() {
 			</div>
 		</div>
 
-		<!-- ========== v10.1 道侣 · 仙缘 ========== -->
+		{:else if activeMenu === "fate"}
+	<!-- ========== v10.1 道侣 · 仙缘 ========== -->
 		<div class="pill-card">
 			<div class="pill-header">
 				<h3 class="pill-title">道侣 · 仙缘</h3>
@@ -3729,7 +3750,8 @@ function closeModal() {
 			</div>
 		</div>
 
-		<!-- ========== 炼丹坊 ========== -->
+		{:else if activeMenu === "pill"}
+	<!-- ========== 炼丹坊 ========== -->
 		<div class="pill-card">
 			<div class="pill-header">
 				<h3 class="pill-title">丹药 · 炼丹坊</h3>
@@ -3790,7 +3812,8 @@ function closeModal() {
 			</div>
 		</div>
 
-		<!-- ========== 日志 ========== -->
+		{:else if activeMenu === "log"}
+	<!-- ========== 日志 ========== -->
 		<div class="log-card">
 			<h3 class="log-title">修炼日志</h3>
 			<div class="log-list">
@@ -3806,7 +3829,8 @@ function closeModal() {
 				{/if}
 			</div>
 		</div>
-	{/if}
+		{/if}
+{/if}
 
 	<!-- ========== 雷劫弹窗 ========== -->
 	{#if showThunderModal}
@@ -4697,4 +4721,39 @@ button.worm-chip { flex-direction: row; gap: 0.45rem; align-items: center; min-w
 }
 .black-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .art-btn { background: linear-gradient(135deg, rgba(14, 165, 233, 0.22), rgba(99, 102, 241, 0.22)); color: #bae6fd; border-color: rgba(14, 165, 233, 0.3); }
+
+/* ===== v10.2 游戏内功能菜单：分页切换系统，主修炼卡常驻 ===== */
+.game-menu {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 10px 0 12px;
+	padding: 5px;
+	border-radius: 0.8rem;
+	border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.15));
+	background: var(--card-bg, rgba(255, 255, 255, 0.03));
+	position: sticky;
+	top: 8px;
+	z-index: 30;
+	backdrop-filter: blur(8px);
+}
+.game-menu-btn {
+	flex: 1 1 0;
+	min-width: 84px;
+	padding: 7px 10px;
+	font-size: 0.85rem;
+	font-weight: 600;
+	border-radius: 0.55rem;
+	border: 1px solid transparent;
+	background: transparent;
+	color: var(--content-meta, rgba(128, 128, 128, 0.9));
+	cursor: pointer;
+	transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.game-menu-btn:hover { color: var(--primary, #6366f1); border-color: var(--line-divider, rgba(128, 128, 128, 0.15)); }
+.game-menu-btn.on {
+	background: var(--primary, #6366f1);
+	border-color: var(--primary, #6366f1);
+	color: #fff;
+}
 </style>
