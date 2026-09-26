@@ -69,7 +69,7 @@ interface Physique {
 	thunderLossMult: number;
 	fortuneMult?: number;
 	demonImmune?: boolean;
-	atkMult?: number; // 攻击加成（大力真武体）
+	atkMult?: number; // 攻击加成（玄金战体等战体）
 }
 
 /** 斗法台对手模板（数值参数化生成） */
@@ -317,11 +317,15 @@ function craftSuccessRate(minRealm: number): number {
 	return Math.max(0.55, 0.97 - minRealm * 0.06);
 }
 
+// 资质 = 悟道禀赋（七类，权重合计 100；旧档 id 保留，名称已换）
 const APTITUDES: Aptitude[] = [
-	{ id: "jia", name: "甲等资质", color: "#fbbf24", desc: "九成空窍真元 · 修炼+40%，突破+8%", weight: 8, xpMult: 1.4, breakBonus: 0.08, fortuneBonus: 0 },
-	{ id: "yi", name: "乙等资质", color: "#60a5fa", desc: "上等之资 · 修炼+20%", weight: 30, xpMult: 1.2, breakBonus: 0, fortuneBonus: 0 },
-	{ id: "bing", name: "丙等资质", color: "#9ca3af", desc: "中人之姿 · 无加成，稳打稳扎", weight: 42, xpMult: 1, breakBonus: 0, fortuneBonus: 0 },
-	{ id: "ding", name: "丁等资质", color: "#a8a29e", desc: "大器晚成 · 修炼-15%，但机缘+8%", weight: 20, xpMult: 0.85, breakBonus: 0, fortuneBonus: 0.08 },
+	{ id: "jia", name: "天纵道资", color: "#fbbf24", desc: "生而知之 · 修炼+40%，突破+8%", weight: 6, xpMult: 1.4, breakBonus: 0.08, fortuneBonus: 0 },
+	{ id: "yi", name: "上根利器", color: "#60a5fa", desc: "一闻千悟 · 修炼+20%", weight: 15, xpMult: 1.2, breakBonus: 0, fortuneBonus: 0 },
+	{ id: "gen", name: "玄门良材", color: "#34d399", desc: "条理通达 · 修炼+10%，突破+3%", weight: 20, xpMult: 1.1, breakBonus: 0.03, fortuneBonus: 0 },
+	{ id: "bing", name: "中平道资", color: "#9ca3af", desc: "中人之姿 · 无加成，稳打稳扎", weight: 23, xpMult: 1, breakBonus: 0, fortuneBonus: 0 },
+	{ id: "ding", name: "驽钝苦修", color: "#a8a29e", desc: "勤能补拙 · 修炼-15%，但机缘+8%", weight: 13, xpMult: 0.85, breakBonus: 0, fortuneBonus: 0.08 },
+	{ id: "su", name: "宿慧前生", color: "#c084fc", desc: "似忆前生道韵 · 突破+6%，机缘+4%", weight: 11, xpMult: 1, breakBonus: 0.06, fortuneBonus: 0.04 },
+	{ id: "gu", name: "天煞孤资", color: "#fb7185", desc: "六亲缘浅道心孤 · 修炼+25%，突破-3%", weight: 12, xpMult: 1.25, breakBonus: -0.03, fortuneBonus: 0 },
 ];
 
 const ROOT_ELEMENTS: RootElement[] = [
@@ -340,20 +344,25 @@ const ROOT_COMBOS: RootCombo[] = [
 	{ id: "wei", name: "伪灵根", count: 5, mult: 0.3, weight: 5, desc: "五行俱全皆不精（×0.3），然悟性惊人：全事件概率 +3%", allEventBonus: 0.03 },
 ];
 
+// 先天体质（十二类，权重合计 100；旧档 id 保留，名称与设定已全部原创化）
 const PHYSIQUES: Physique[] = [
-	{ id: "fantai", name: "凡体", color: "#9ca3af", desc: "芸芸众生，大道靠己", weight: 40, xpMult: 1, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1 },
-	{ id: "lingti", name: "灵体", color: "#34d399", desc: "天生近道 · 收益 +15%", weight: 20, xpMult: 1.15, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1 },
-	{ id: "zhenwu", name: "大力真武体", color: "#ef4444", desc: "十绝体 · 收益+30%，攻击+15%，但心魔+3%", weight: 10, xpMult: 1.3, breakBonus: 0, demonProbDelta: 0.03, thunderLossMult: 1, atkMult: 1.15 },
-	{ id: "bingpo", name: "北冥冰魄体", color: "#7dd3fc", desc: "十绝体 · 心魔免疫，但突破 -5%", weight: 8, xpMult: 1, breakBonus: -0.05, demonProbDelta: 0, thunderLossMult: 1, demonImmune: true },
-	{ id: "senhai", name: "森海轮回体", color: "#4ade80", desc: "十绝体 · 机缘翻倍，但打坐收益 -10%", weight: 8, xpMult: 0.9, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1, fortuneMult: 2 },
-	{ id: "daoti", name: "道体", color: "#60a5fa", desc: "道韵天成 · 突破与渡劫 +8%", weight: 8, xpMult: 1, breakBonus: 0.08, demonProbDelta: 0, thunderLossMult: 1 },
-	{ id: "daotai", name: "先天圣体道胎", color: "#fbbf24", desc: "万古无一 · 收益+50%，突破+10%", weight: 4, xpMult: 1.5, breakBonus: 0.1, demonProbDelta: 0, thunderLossMult: 1 },
-	{ id: "zhizun", name: "至尊仙胎体", color: "#e879f9", desc: "仙胎无瑕 · 收益+80%，突破+15%，雷劫损失减半", weight: 2, xpMult: 1.8, breakBonus: 0.15, demonProbDelta: 0, thunderLossMult: 0.5 },
+	{ id: "fantai", name: "凡胎浊骨", color: "#9ca3af", desc: "芸芸众生，大道靠己", weight: 24, xpMult: 1, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1 },
+	{ id: "lingti", name: "清灵道体", color: "#34d399", desc: "经脉通透近道 · 收益 +15%", weight: 16, xpMult: 1.15, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1 },
+	{ id: "zhenwu", name: "玄金战体", color: "#ef4444", desc: "骨如玄金 · 收益+30%，攻击+15%，心魔易生（+3%）", weight: 9, xpMult: 1.3, breakBonus: 0, demonProbDelta: 0.03, thunderLossMult: 1, atkMult: 1.15 },
+	{ id: "bingpo", name: "寂水寒渊体", color: "#7dd3fc", desc: "心若寒潭 · 心魔免疫，但突破 -5%", weight: 7, xpMult: 1, breakBonus: -0.05, demonProbDelta: 0, thunderLossMult: 1, demonImmune: true },
+	{ id: "senhai", name: "枯荣双生体", color: "#4ade80", desc: "一枯一荣 · 机缘翻倍，但打坐收益 -10%", weight: 7, xpMult: 0.9, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1, fortuneMult: 2 },
+	{ id: "daoti", name: "太一妙道体", color: "#60a5fa", desc: "道韵天成 · 突破与渡劫 +8%", weight: 7, xpMult: 1, breakBonus: 0.08, demonProbDelta: 0, thunderLossMult: 1 },
+	{ id: "wugou", name: "无垢琉璃身", color: "#67e8f9", desc: "琉璃无瑕 · 收益 +10%，雷劫损失减半", weight: 6, xpMult: 1.1, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 0.5 },
+	{ id: "wanyao", name: "万妖吞天体", color: "#dc2626", desc: "吞噬万物养己 · 收益 +20%、攻击 +20%，心魔大盛（+5%）", weight: 6, xpMult: 1.2, breakBonus: 0, demonProbDelta: 0.05, thunderLossMult: 1, atkMult: 1.2 },
+	{ id: "wangqing", name: "太上忘情体", color: "#a5f3fc", desc: "忘情弃欲 · 心魔免疫，收益 +10%", weight: 5, xpMult: 1.1, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1, demonImmune: true },
+	{ id: "chizi", name: "赤子明道体", color: "#fca5a5", desc: "赤子之心不染尘 · 收益 +20%，机缘 ×1.4", weight: 5, xpMult: 1.2, breakBonus: 0, demonProbDelta: 0, thunderLossMult: 1, fortuneMult: 1.4 },
+	{ id: "daotai", name: "先天混沌道胎", color: "#fbbf24", desc: "一缕混沌蕴身中 · 收益+50%，突破+10%", weight: 4, xpMult: 1.5, breakBonus: 0.1, demonProbDelta: 0, thunderLossMult: 1 },
+	{ id: "zhizun", name: "鸿蒙紫气仙胎", color: "#e879f9", desc: "紫气东来三万里 · 收益+80%，突破+15%，雷劫损失减半", weight: 4, xpMult: 1.8, breakBonus: 0.15, demonProbDelta: 0, thunderLossMult: 0.5 },
 ];
 
 /** 斗法台对手（由弱到强） */
 const ENEMY_TEMPLATES: EnemyTemplate[] = [
-	{ id: "yaolang", name: "落霞妖狼", title: "炼气级妖兽", levelOffset: -1, rewardFactor: 0.8 },
+	{ id: "yaolang", name: "落霞妖狼", title: "淬体级妖兽", levelOffset: -1, rewardFactor: 0.8 },
 	{ id: "sanxiu", name: "黑风寨散修", title: "同境修士", levelOffset: 0, rewardFactor: 1.0 },
 	{ id: "mangyao", name: "碧波潭蟒妖", title: "越境妖兽", levelOffset: 1, rewardFactor: 1.4 },
 	{ id: "jianxiu", name: "逐风剑修", title: "越境剑修", levelOffset: 1, rewardFactor: 1.5 },
@@ -927,7 +936,7 @@ const artifactBonus = $derived(player.equip.artifact ? equipValue(player.equip.a
 const maxHp = $derived(
 	100 + currentRealm.level * 60 + player.qutiUsed * 80 + (bodyManual?.hpBonus ?? 0) + artifactBonus + wormBonus.hp + partnerBonus.hp + (hasTalent("body") ? 150 : 0),
 );
-/** 攻击：境界 + 增元丹 + 武器 + 攻伐功法 + 灵虫 + 道侣，再乘真武体加成 */
+/** 攻击：境界 + 增元丹 + 武器 + 攻伐功法 + 灵虫 + 道侣，再乘战体加成 */
 const atk = $derived(
 	Math.round(
 		(8 + currentRealm.level * 7 + player.zengyuanUsed * 8 + (attackManual?.atkBonus ?? 0) + weaponBonus + wormBonus.atk + partnerBonus.atk) *
@@ -1260,7 +1269,7 @@ function lifespanTick() {
 
 // ==================== v10 心魔 / 丹毒 ====================
 
-/** 心魔积累：受灵虫定心与冰魄体免疫影响，封顶 100 */
+/** 心魔积累：受灵虫定心与寒渊/忘情体免疫影响，封顶 100 */
 function addDemon(amount: number) {
 	if (currentPhysique?.demonImmune) return;
 	const cut = Math.min(amount, wormBonus.demonCut * 0.5);

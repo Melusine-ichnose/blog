@@ -10,18 +10,21 @@ interface LogEntry {
 interface PlayerState {
 	xp: number;
 	realmIndex: number;
+	schemaV?: number;
 	lastBreakthrough: string | null;
-	totalCultivations: number;
+	totalCultivations?: number;
+	totalBreaths?: number;
 	log: LogEntry[];
 }
 
-const STORAGE_KEY = "xiuxian_save_v1";
-const REALMS = ["炼气期","筑基期","金丹期","元婴期","化神期","合体期","渡劫期","大乘期","飞升境"];
+const REALMS = ["淬体境","引气境","练气境","筑基境","金丹境","元婴境","化神境","炼虚境","合体境","洞虚境","大乘境","渡劫境","真仙境"];
+// 旧九阶索引 → 十三阶索引
+const REALM_MIGRATION = [2, 3, 4, 5, 6, 8, 11, 10, 12];
 
 let player = $state<PlayerState | null>(null);
 
 if (typeof localStorage !== "undefined") {
-	const raw = localStorage.getItem(STORAGE_KEY);
+	const raw = localStorage.getItem("xiuxian_save_v6") ?? localStorage.getItem("xiuxian_save_v1");
 	if (raw) {
 		try {
 			player = JSON.parse(raw);
@@ -30,6 +33,14 @@ if (typeof localStorage !== "undefined") {
 		}
 	}
 }
+
+const realmName = $derived.by(() => {
+	if (!player) return "";
+	const idx = player.realmIndex ?? 0;
+	const realIdx = player.schemaV === 2 ? idx : (REALM_MIGRATION[idx] ?? idx);
+	return REALMS[realIdx] ?? REALMS[0];
+});
+const cultivationCount = $derived(player?.totalBreaths ?? player?.totalCultivations ?? 0);
 
 const typeColor: Record<string, string> = {
 	info: "text-(--content-meta)",
@@ -42,9 +53,9 @@ const typeColor: Record<string, string> = {
 {#if player}
   <div class="mb-6 p-4 rounded-lg bg-(--btn-regular-bg)">
     <div class="text-sm text-(--content-meta)">
-      当前境界：<span class="font-bold text-(--primary)">{REALMS[player.realmIndex]}</span>
+      当前境界：<span class="font-bold text-(--primary)">{realmName}</span>
       · 修为 {player.xp.toLocaleString()}
-      · 累计修炼 {player.totalCultivations} 次
+      · 累计打坐 {cultivationCount} 息
     </div>
   </div>
 
