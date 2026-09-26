@@ -9,10 +9,10 @@ interface Realm {
 }
 
 const REALMS: Realm[] = [
-	{ name: "淬体境", level: 1, requiredXp: 30, description: "凡胎锻骨，初窥门径" },
-	{ name: "引气境", level: 2, requiredXp: 70, description: "引气入体，涤荡经脉" },
-	{ name: "练气境", level: 3, requiredXp: 160, description: "吐纳天地灵气，气旋丹田" },
-	{ name: "筑基境", level: 4, requiredXp: 400, description: "筑就道基，寿元增至两百载" },
+	{ name: "淬体境", level: 1, requiredXp: 50, description: "凡胎锻骨，初窥门径" },
+	{ name: "引气境", level: 2, requiredXp: 130, description: "引气入体，涤荡经脉" },
+	{ name: "练气境", level: 3, requiredXp: 300, description: "吐纳天地灵气，气旋丹田" },
+	{ name: "筑基境", level: 4, requiredXp: 650, description: "筑就道基，寿元增至两百载" },
 	{ name: "金丹境", level: 5, requiredXp: 1000, description: "凝结金丹，首次小天劫降临" },
 	{ name: "元婴境", level: 6, requiredXp: 2400, description: "元婴出窍，神识覆盖千里" },
 	{ name: "化神境", level: 7, requiredXp: 5500, description: "化神归一，可移山填海" },

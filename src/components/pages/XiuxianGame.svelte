@@ -267,10 +267,10 @@ interface EventResult {
 // ==================== 常量 ====================
 
 const REALMS: Realm[] = [
-	{ name: "淬体境", level: 1, requiredXp: 30, description: "凡胎锻骨，初窥门径", thunderTrial: false, lifespan: 80 },
-	{ name: "引气境", level: 2, requiredXp: 70, description: "引气入体，涤荡经脉", thunderTrial: false, lifespan: 100 },
-	{ name: "练气境", level: 3, requiredXp: 160, description: "吐纳天地灵气，气旋丹田", thunderTrial: false, lifespan: 120 },
-	{ name: "筑基境", level: 4, requiredXp: 400, description: "筑就道基，寿元增至两百载", thunderTrial: false, lifespan: 200 },
+	{ name: "淬体境", level: 1, requiredXp: 50, description: "凡胎锻骨，初窥门径", thunderTrial: false, lifespan: 80 },
+	{ name: "引气境", level: 2, requiredXp: 130, description: "引气入体，涤荡经脉", thunderTrial: false, lifespan: 100 },
+	{ name: "练气境", level: 3, requiredXp: 300, description: "吐纳天地灵气，气旋丹田", thunderTrial: false, lifespan: 120 },
+	{ name: "筑基境", level: 4, requiredXp: 650, description: "筑就道基，寿元增至两百载", thunderTrial: false, lifespan: 200 },
 	{ name: "金丹境", level: 5, requiredXp: 1000, description: "凝结金丹，首次小天劫降临", thunderTrial: true, lifespan: 400 },
 	{ name: "元婴境", level: 6, requiredXp: 2400, description: "元婴出窍，神识覆盖千里", thunderTrial: true, lifespan: 800 },
 	{ name: "化神境", level: 7, requiredXp: 5500, description: "化神归一，可移山填海", thunderTrial: true, lifespan: 1500 },
@@ -517,7 +517,7 @@ function subStageOf(realmIndex: number, xp: number): string {
 const TALISMANS: Talisman[] = [
 	{ id: "strike", name: "五雷符", color: "#fbbf24", desc: "战斗中催动：引五雷轰顶，造成相当于自身攻击 3 倍的固定伤害", price: 120, minRealm: 2 },
 	{ id: "seal", name: "镇妖符", color: "#60a5fa", desc: "战斗中催动：封印敌身一回合，本回合敌人无法反击", price: 90, minRealm: 2 },
-	{ id: "clear", name: "清心符", color: "#34d399", desc: "静心通神：心魔 -20（心魔过高会削减突破率、招致走火入魔）", price: 150, minRealm: 2 },
+	{ id: "clear", name: "清心符", color: "#34d399", desc: "静心通神：心魔 -20（心魔过高会削减突破率、招致走火入魔）", price: 80, minRealm: 0 },
 	{ id: "anti", name: "破劫符", color: "#c084fc", desc: "渡天劫时祭出：硬挡一道天雷（与破境丹同理）", price: 600, minRealm: 4 },
 	{ id: "life", name: "替死符", color: "#f0abfc", desc: "本命保命法器：濒死时自动触发，满血复生且不积因果债（消耗品）", price: 1200, minRealm: 4 },
 ];
@@ -966,19 +966,26 @@ function clampDim(v: number): number {
 	return Math.max(0, Math.min(1000, Math.round(v)));
 }
 const sixDims = $derived.by(() => {
+	const lv = currentRealm.level;
+	// 各维以「同境界裸装/无灾基准」归一到 500（五格）：装备丹药灵虫天赋推高，业力心魔丹毒削低
+	const norm = (v: number, base: number) => clampDim((v / Math.max(1, base)) * 500);
+	const fleshBase = (100 + lv * 60) * 1.2 + (8 + lv * 7) * 4 + (4 + lv * 4) * 4;
 	const flesh = maxHp * 1.2 + atk * 4 + def * 4; // 肉身强度
-	const spirit = breathXp * 12 + currentRealm.level * 60; // 灵力底蕴
-	const soul = 120 + player.wudaoLeft * 2 + player.thunderPassed * 40 + player.towerFloor * 6; // 神魂力量
-	const dao = player.manuals.length * 55 + player.realmIndex * 60 + Object.values(player.defeated).filter(Boolean).length * 20; // 道韵感悟
+	const spiritBase = (5 + lv * 3) * 12 + lv * 60;
+	const spirit = breathXp * 12 + lv * 60; // 灵力底蕴
+	const soulBase = 120 + player.realmIndex * 20;
+	const soul = soulBase + player.wudaoLeft * 2 + player.thunderPassed * 40 + player.towerFloor * 6; // 神魂力量
+	const daoBase = Math.max(60, player.realmIndex * 60);
+	const dao = player.realmIndex * 60 + player.manuals.length * 55 + Object.values(player.defeated).filter(Boolean).length * 20; // 道韵感悟
 	const causal = 200 - Math.min(180, player.karmaDebt + player.karma * 0.5) + (hasTalent("causal") ? 120 : 0); // 因果抗性
-	const heart = Math.max(0, 100 - player.demon + wormBonus.demonCut * 3 + (currentPhysique?.demonImmune ? 400 : 0)); // 心魔抗性
+	const heart = Math.max(0, 100 - player.demon) + wormBonus.demonCut * 3 + (currentPhysique?.demonImmune ? 400 : 0); // 心魔抗性
 	return [
-		{ key: "肉身", value: clampDim(flesh) },
-		{ key: "灵力", value: clampDim(spirit) },
-		{ key: "神魂", value: clampDim(soul) },
-		{ key: "道韵", value: clampDim(dao) },
-		{ key: "因果", value: clampDim(causal) },
-		{ key: "心魔抗", value: clampDim(heart) },
+		{ key: "肉身", value: norm(flesh, fleshBase) },
+		{ key: "灵力", value: norm(spirit, spiritBase) },
+		{ key: "神魂", value: norm(soul, soulBase) },
+		{ key: "道韵", value: norm(dao, daoBase) },
+		{ key: "因果", value: norm(causal, 200) },
+		{ key: "心魔抗", value: norm(heart, 100) },
 	];
 });
 
@@ -2453,6 +2460,13 @@ function equipManual(id: string) {
 function getEnemy(tpl: EnemyTemplate): EnemyStats {
 	const level = Math.max(1, currentRealm.level + tpl.levelOffset);
 	const base = makeEnemy(level, 1, 1);
+	// 淬体境首敌：等级已被钳制为 1，无法再低，直接弱化属性，让新手首场稳胜
+	if (currentRealm.level === 1 && tpl.levelOffset < 0) {
+		base.hp = Math.round(base.hp * 0.6);
+		base.atk = Math.round(base.atk * 0.6);
+		base.def = Math.max(0, Math.round(base.def * 0.6));
+		base.power = Math.round(base.hp * 0.5 + base.atk * 4 + base.def * 3);
+	}
 	return { tpl, level, ...base };
 }
 
@@ -2654,7 +2668,7 @@ function finishBattleWin(tpl: EnemyTemplate) {
 	if (!b) return;
 	const idx = ENEMY_TEMPLATES.findIndex((t) => t.id === tpl.id);
 	const enemy = getEnemy(tpl);
-	const base = Math.round(enemy.power * tpl.rewardFactor * 0.6);
+	const base = Math.round(enemy.power * tpl.rewardFactor);
 	const first = !player.defeated[tpl.id];
 	let total = base;
 	if (first) {
@@ -2724,8 +2738,8 @@ function finishBattleLose() {
 	b.reward = loss;
 	battlePushLog(`你灵力枯竭倒在台上，损失 ${loss} 修为，气血见底。`, "danger");
 	addLog(`斗法台 · 你不敌「${b.enemyName}」（战力 ${b.epower}），力竭败退，损失 ${loss} 修为。`, "danger");
-	// v10 败北滋生心魔 +15
-	addDemon(15);
+	// v10 败北滋生心魔 +8
+	addDemon(8);
 	save();
 	// 血量归零 → 濒死判定（替死符/残魂玉复活或血溅当场入轮回；入轮回会关闭战斗弹窗）
 	checkNearDeath("battle");
@@ -3419,7 +3433,7 @@ function closeModal() {
 						</div>
 						<div class="arena-stats">
 							{#if unlocked}
-								战力 {enemy.power.toLocaleString()} · 胜赏约 {Math.round(enemy.power * tpl.rewardFactor * 0.6).toLocaleString()} 修为
+								战力 {enemy.power.toLocaleString()} · 胜赏约 {Math.round(enemy.power * tpl.rewardFactor).toLocaleString()} 修为（首通翻倍）
 								{#if cd > 0}<span class="arena-cd"> · 冷却 {cd} 息</span>{/if}
 							{:else}
 								<span class="arena-locked-text">🔒 先首胜「{ENEMY_TEMPLATES[i - 1]?.name}」方可挑战</span>
