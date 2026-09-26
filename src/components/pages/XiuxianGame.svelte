@@ -30,9 +30,21 @@ interface Pill {
 	desc: string;
 	cost: number;
 	minRealm: number;
+	/** 丹药品阶：仅作展示与定价参考 */
+	grade: PillGrade;
 	/** 仅坊市出售：炼丹坊不可炼制、随机掉落与战斗缴获不产出 */
 	shopOnly?: boolean;
 }
+
+/** 丹药品阶 */
+type PillGrade = "凡品" | "灵品" | "宝品" | "仙品" | "神品";
+const GRADE_COLORS: Record<PillGrade, string> = {
+	凡品: "#9ca3af",
+	灵品: "#34d399",
+	宝品: "#c084fc",
+	仙品: "#fbbf24",
+	神品: "#e879f9",
+};
 
 interface Aptitude {
 	id: string;
@@ -214,8 +226,8 @@ interface PlayerState {
 	thunderPassed: number;
 	battlesWon: number;
 	battlesLost: number;
-	qutiUsed: number; // 累计已服淬体丹数（永久 +80 气血上限/颗）
-	zengyuanUsed: number; // 累计已服增元丹数（永久 +8 攻击/颗）
+	qutiUsed: number; // 累计已服淬体丹数（永久 +30×当前境界 气血上限/颗，随境界散开）
+	zengyuanUsed: number; // 累计已服增元丹数（永久 +2×当前境界 攻击/颗）
 	manuals: string[]; // 已获得的功法 id
 	equipped: Record<ManualSlot, string | null>; // 三槽位装备中的功法
 	defeated: Record<string, boolean>; // 斗法台首通记录（对手 id）
@@ -294,22 +306,22 @@ const SAVE_SCHEMA = 2;
  * 永久属性丹：淬体丹（+气血上限）、增元丹（+攻击）；回春丹为战斗补给。
  */
 const PILLS: Pill[] = [
-	{ id: "juqi", name: "聚气丹", color: "#34d399", desc: "服下 +120 修为", cost: 50, minRealm: 0 },
-	{ id: "huichun", name: "回春丹", color: "#f87171", desc: "立即恢复 50% 气血", cost: 40, minRealm: 0 },
-	{ id: "ningshen", name: "凝神丹", color: "#60a5fa", desc: "30 息修炼收益翻倍", cost: 250, minRealm: 2 },
-	{ id: "pojing", name: "破境丹", color: "#c084fc", desc: "突破+25%；渡劫可挡一道天雷", cost: 600, minRealm: 4 },
-	{ id: "quti", name: "淬体丹", color: "#fb923c", desc: "永久 +80 气血上限（立即回满差值）", cost: 700, minRealm: 4 },
-	{ id: "zengyuan", name: "增元丹", color: "#ef4444", desc: "永久 +8 攻击", cost: 900, minRealm: 5 },
-	{ id: "tianyuan", name: "天元丹", color: "#fbbf24", desc: "服下 +2500 修为", cost: 1200, minRealm: 5 },
-	{ id: "wudao", name: "悟道丹", color: "#f472b6", desc: "60 息内机缘类事件概率 ×3", cost: 2500, minRealm: 6 },
-	{ id: "jiuzhuan", name: "九转金丹", color: "#e879f9", desc: "服下 +15000 修为", cost: 6000, minRealm: 8 },
+	{ id: "juqi", name: "聚气丹", color: "#34d399", desc: "服下获约 20 息周天修为（随境界精进）", cost: 50, minRealm: 0, grade: "凡品" },
+	{ id: "huichun", name: "回春丹", color: "#f87171", desc: "立即恢复 50% 气血", cost: 40, minRealm: 0, grade: "凡品" },
+	{ id: "ningshen", name: "凝神丹", color: "#60a5fa", desc: "30 息修炼收益翻倍", cost: 250, minRealm: 2, grade: "灵品" },
+	{ id: "pojing", name: "破境丹", color: "#c084fc", desc: "突破+25%；渡劫可挡一道天雷", cost: 600, minRealm: 4, grade: "灵品" },
+	{ id: "quti", name: "淬体丹", color: "#fb923c", desc: "永久气血上限 +30×当前境界（丹力随境界散开）", cost: 700, minRealm: 4, grade: "宝品" },
+	{ id: "zengyuan", name: "增元丹", color: "#ef4444", desc: "永久攻击 +2×当前境界（丹力随境界散开）", cost: 900, minRealm: 5, grade: "宝品" },
+	{ id: "tianyuan", name: "天元丹", color: "#fbbf24", desc: "服下获约 60 息周天修为（随境界精进）", cost: 1200, minRealm: 4, grade: "宝品" },
+	{ id: "wudao", name: "悟道丹", color: "#f472b6", desc: "60 息内机缘类事件概率 ×3", cost: 2500, minRealm: 6, grade: "仙品" },
+	{ id: "jiuzhuan", name: "九转金丹", color: "#e879f9", desc: "服下获约 250 息周天修为（随境界精进）", cost: 6000, minRealm: 7, grade: "仙品" },
 	// v9 黑暗轮回：寿元与因果道具
-	{ id: "shouyuan", name: "延寿丹", color: "#4ade80", desc: "服下寿元 +80 载（不逾上限）", cost: 800, minRealm: 3 },
-	{ id: "timesand", name: "光阴碎片", color: "#67e8f9", desc: "光阴回溯 · 气血回满；代价：因果债 +30", cost: 5000, minRealm: 0, shopOnly: true },
-	{ id: "souljade", name: "残魂因果玉", color: "#f0abfc", desc: "被动护身 · 濒死自动满血复活（每世限 3 次）；代价：因果债 +40", cost: 8000, minRealm: 0, shopOnly: true },
+	{ id: "shouyuan", name: "延寿丹", color: "#4ade80", desc: "服下寿元 +120 载（不逾上限）", cost: 800, minRealm: 2, grade: "灵品" },
+	{ id: "timesand", name: "光阴碎片", color: "#67e8f9", desc: "光阴回溯 · 气血回满；代价：因果债 +30", cost: 5000, minRealm: 0, grade: "神品", shopOnly: true },
+	{ id: "souljade", name: "残魂因果玉", color: "#f0abfc", desc: "被动护身 · 濒死自动满血复活（每世限 3 次）；代价：因果债 +40", cost: 8000, minRealm: 0, grade: "神品", shopOnly: true },
 	// v10 神品因果道具
-	{ id: "mirror", name: "命运窥镜", color: "#7dd3fc", desc: "窥探下一次天劫劫型；代价：因果债 +25、心魔 +10", cost: 6000, minRealm: 6, shopOnly: true },
-	{ id: "karmaseal", name: "因果洗印符", color: "#fda4af", desc: "神品 · 抹除 40 点因果债；代价：损耗百年寿元、道韵溃散", cost: 9000, minRealm: 8, shopOnly: true },
+	{ id: "mirror", name: "命运窥镜", color: "#7dd3fc", desc: "窥探下一次天劫劫型；代价：因果债 +25、心魔 +10", cost: 6000, minRealm: 6, grade: "神品", shopOnly: true },
+	{ id: "karmaseal", name: "因果洗印符", color: "#fda4af", desc: "神品 · 抹除 40 点因果债；代价：损耗百年寿元、道韵溃散", cost: 9000, minRealm: 8, grade: "神品", shopOnly: true },
 ];
 
 /** 炼丹成功率：随丹药所需境界递减（97% → 67%） */
@@ -588,7 +600,7 @@ const SCOUT_COST = 150;
 
 /** 黑市三桩交易（均留因果印记） */
 const BLACK_DEALS = [
-	{ id: "bm_life", name: "夺寿灵材", price: 800, cd: 120, desc: "邪修掠夺而来的寿元灵材：寿元 +15 载；业力 +20、因果债 +10、声望 -10" },
+	{ id: "bm_life", name: "夺寿灵材", price: 800, cd: 120, desc: "邪修掠夺而来的寿元灵材：寿元 +30 载；业力 +20、因果债 +10、声望 -10" },
 	{ id: "bm_talisman", name: "黑货符箓", price: 300, cd: 90, desc: "来路不明的高阶符箓：随机得符一张；因果债 +8、声望 -5" },
 	{ id: "bm_pill", name: "贼赃丹药", price: 350, cd: 90, desc: "半价黑市丹：随机高阶丹药一颗；因果债 +5、声望 -3" },
 ];
@@ -610,11 +622,11 @@ const CULTIVATE_TEXTS = [
 ];
 
 const FORTUNE_EVENTS = [
-	{ text: "你发现了一株百年灵药，修为大涨！", xpMultiplier: 3 },
-	{ text: "你在古洞府中领悟了前辈留下的功法，修为大增！", xpMultiplier: 5 },
-	{ text: "你参悟了天地法则，顿悟之下修为大进！", xpMultiplier: 6 },
+	{ text: "你发现了一株百年灵药，修为大涨！", xpMultiplier: 2 },
+	{ text: "你在古洞府中领悟了前辈留下的功法，修为大增！", xpMultiplier: 4 },
+	{ text: "你参悟了天地法则，顿悟之下修为大进！", xpMultiplier: 5 },
 	{ text: "你捡到了一块灵石，吸收后修为提升！", xpMultiplier: 2 },
-	{ text: "有高人路过，见你资质不俗，随手点拨了一番！", xpMultiplier: 4 },
+	{ text: "有高人路过，见你资质不俗，随手点拨了一番！", xpMultiplier: 3 },
 ];
 
 const BEAST_NAMES = ["赤炎狼", "碧鳞蟒", "铁背苍熊", "幽冥豹", "金翅雕", "九尾妖狐", "墨玉麒麟幼兽"];
@@ -943,14 +955,14 @@ const weaponBonus = $derived(player.equip.weapon ? equipValue(player.equip.weapo
 const armorBonus = $derived(player.equip.armor ? equipValue(player.equip.armor) : 0);
 const artifactBonus = $derived(player.equip.artifact ? equipValue(player.equip.artifact) : 0);
 
-/** 气血上限：境界 + 淬体丹 + 炼体功法 + 法宝槽 + 灵虫 + 道侣羁绊 + 轮回天赋「金刚道胎」 */
+/** 气血上限：境界 + 淬体丹（30×境界/颗，随境界散开）+ 炼体功法 + 法宝槽 + 灵虫 + 道侣羁绊 + 轮回天赋「金刚道胎」 */
 const maxHp = $derived(
-	100 + currentRealm.level * 60 + player.qutiUsed * 80 + (bodyManual?.hpBonus ?? 0) + artifactBonus + wormBonus.hp + partnerBonus.hp + (hasTalent("body") ? 150 : 0),
+	100 + currentRealm.level * 60 + player.qutiUsed * 30 * currentRealm.level + (bodyManual?.hpBonus ?? 0) + artifactBonus + wormBonus.hp + partnerBonus.hp + (hasTalent("body") ? 150 : 0),
 );
-/** 攻击：境界 + 增元丹 + 武器 + 攻伐功法 + 灵虫 + 道侣，再乘战体加成 */
+/** 攻击：境界 + 增元丹（2×境界/颗）+ 武器 + 攻伐功法 + 灵虫 + 道侣，再乘战体加成 */
 const atk = $derived(
 	Math.round(
-		(8 + currentRealm.level * 7 + player.zengyuanUsed * 8 + (attackManual?.atkBonus ?? 0) + weaponBonus + wormBonus.atk + partnerBonus.atk) *
+		(8 + currentRealm.level * 7 + player.zengyuanUsed * 2 * currentRealm.level + (attackManual?.atkBonus ?? 0) + weaponBonus + wormBonus.atk + partnerBonus.atk) *
 			(currentPhysique?.atkMult ?? 1),
 	),
 );
@@ -1275,11 +1287,11 @@ function buyTalent(t: RebirthTalent) {
 
 /**
  * 自然寿元流逝：低境界岁月侵蚀快，境界越高流逝越缓，真仙几乎不损。
- * 淬体~练气 30 息/年，筑基~元婴 60，化神~合体 120，洞虚~渡劫 240，真仙不流逝。
+ * 淬体~练气 20 息/年，筑基~元婴 45，化神~合体 90，洞虚~渡劫 180，真仙不流逝。
  */
 function lifespanTick() {
 	if (player.realmIndex >= 12) return;
-	const interval = player.realmIndex <= 2 ? 30 : player.realmIndex <= 5 ? 60 : player.realmIndex <= 8 ? 120 : 240;
+	const interval = player.realmIndex <= 2 ? 20 : player.realmIndex <= 5 ? 45 : player.realmIndex <= 8 ? 90 : 180;
 	if (player.totalBreaths > 0 && player.totalBreaths % interval === 0) {
 		addLifespan(-1);
 	}
@@ -1524,11 +1536,11 @@ function blackDeal(idx: number) {
 	player.stones -= deal.price;
 	player.cooldowns[deal.id] = deal.cd;
 	if (deal.id === "bm_life") {
-		addLifespan(15);
+		addLifespan(30);
 		addKarma(20);
 		addKarmaDebt(10);
 		player.reputation -= 10;
-		addLog("黑市 · 你购下邪修夺来的寿元灵材，寿元 +15，业力与因果债缠身，正道侧目。", "warning");
+		addLog("黑市 · 你购下邪修夺来的寿元灵材，寿元 +30，业力与因果债缠身，正道侧目。", "warning");
 	} else if (deal.id === "bm_talisman") {
 		const t = TALISMANS[Math.floor(Math.random() * TALISMANS.length)];
 		player.talismans[t.id] += 1;
@@ -1747,9 +1759,12 @@ function doEnhance() {
 
 // ==================== 坊市 ====================
 
-/** 坊市售价：cost/10 取整到十位、最低 50 灵石 */
+/** 坊市售价：丹药耗用随境界上调（与随境界增长的效果同步），cost/10 取整到十位、最低 50 灵石 */
+function pillCost(pill: Pill): number {
+	return Math.round(pill.cost * (1 + currentRealm.level * 0.3));
+}
 function shopPrice(pill: Pill): number {
-	return Math.max(50, Math.round(pill.cost / 100) * 10);
+	return Math.max(50, Math.round(pillCost(pill) / 100) * 10);
 }
 
 function buyShopPill(pill: Pill) {
@@ -1926,9 +1941,9 @@ function rollRandomEvent(base: number): EventResult {
 	});
 
 	pool.push({
-		weight: 6 * ff,
+		weight: 3 * ff,
 		run: () => {
-			const mult = 8 + Math.floor(Math.random() * 5);
+			const mult = 5 + Math.floor(Math.random() * 4);
 			addLog(`你忽闻大道之声，当场顿悟！本息修为 ×${mult}！`, "success");
 			return { mult };
 		},
@@ -2108,6 +2123,16 @@ function rollRandomEvent(base: number): EventResult {
 		});
 	}
 
+	// ===== 精血衰败：岁月侵蚀，寿元悄然流逝（让延寿丹/老死线有存在感）=====
+	pool.push({
+		weight: 7,
+		run: () => {
+			const loss = 4 + Math.floor(Math.random() * 4);
+			addLifespan(-loss);
+			addLog(`忽觉精血衰败、鬓边添霜，岁月无声流逝（寿元 -${loss} 载）。延寿丹或福地灵泉可补。`, "danger");
+		},
+	});
+
 	// ===== 妖兽突袭：按战力自动战斗（不中断打坐）=====
 	pool.push({
 		weight: 34,
@@ -2139,7 +2164,7 @@ function rollRandomEvent(base: number): EventResult {
 			weight: 20,
 			run: () => {
 				const pill = marketPool[Math.floor(Math.random() * marketPool.length)];
-				const price = Math.floor(pill.cost * 0.6);
+				const price = Math.floor(pillCost(pill) * 0.6);
 				if (player.xp >= price) {
 					player.xp -= price;
 					player.pills[pill.id] += 1;
@@ -2331,10 +2356,12 @@ function usePill(pill: Pill) {
 	player.pills[pill.id] -= 1;
 
 	switch (pill.id) {
-		case "juqi":
-			player.xp += 120;
-			addLog("你服下一颗聚气丹，灵力增长 120 点。", "success");
+		case "juqi": {
+			const gain = Math.max(100, Math.round(breathXp * 20));
+			player.xp += gain;
+			addLog(`你服下一颗聚气丹，灵力增长 ${gain} 点。`, "success");
 			break;
+		}
 		case "huichun":
 			healHp(maxHp * 0.5);
 			addLog("你服下回春丹，温润药力游走四肢百骸，恢复 50% 气血。", "success");
@@ -2347,32 +2374,40 @@ function usePill(pill: Pill) {
 			player.pojingActive = true;
 			addLog("你服下一颗破境丹，下次突破成功率大增。", "success");
 			break;
-		case "quti":
-			// 累计服用数 +1，derived 上限同步 +80，再把新增的 80 点补满
+		case "quti": {
+			// 累计服用数 +1，上限按「30×当前境界」折算，境界提升后旧丹药力同步散开
+			const gain = 30 * currentRealm.level;
 			player.qutiUsed += 1;
-			healHp(80);
-			addLog("淬体丹药力淬炼筋骨，气血上限永久 +80！", "success");
+			healHp(gain);
+			addLog(`淬体丹药力淬炼筋骨，气血上限永久 +${gain}！`, "success");
 			break;
-		case "zengyuan":
-			// 累计服用数 +1，攻击 derived 同步 +8
+		}
+		case "zengyuan": {
+			// 累计服用数 +1，攻击按「2×当前境界」折算，随境界一同精进
+			const gain = 2 * currentRealm.level;
 			player.zengyuanUsed += 1;
-			addLog("增元丹真元入体，攻击永久 +8！", "success");
+			addLog(`增元丹真元入体，攻击永久 +${gain}！`, "success");
 			break;
-		case "tianyuan":
-			player.xp += 2500;
-			addLog("你服下一颗天元丹，修为暴涨 2500 点！", "success");
+		}
+		case "tianyuan": {
+			const gain = Math.max(800, Math.round(breathXp * 60));
+			player.xp += gain;
+			addLog(`你服下一颗天元丹，修为暴涨 ${gain} 点！`, "success");
 			break;
+		}
 		case "wudao":
 			player.wudaoLeft += 60;
 			addLog("你服下一颗悟道丹，60 息内机缘类事件概率三倍！", "success");
 			break;
-		case "jiuzhuan":
-			player.xp += 15000;
-			addLog("九转金丹入口即化，修为狂涨 15000 点！！", "success");
+		case "jiuzhuan": {
+			const gain = Math.max(4000, Math.round(breathXp * 250));
+			player.xp += gain;
+			addLog(`九转金丹入口即化，修为狂涨 ${gain} 点！！`, "success");
 			break;
+		}
 		case "shouyuan":
-			addLifespan(80);
-			addLog("你服下一颗延寿丹，生机焕发，寿元 +80 载。", "success");
+			addLifespan(120);
+			addLog("你服下一颗延寿丹，生机焕发，寿元 +120 载。", "success");
 			break;
 		case "timesand":
 			player.hp = maxHp;
@@ -2412,16 +2447,17 @@ function usePill(pill: Pill) {
 	save();
 }
 
-/** 炼丹：按丹药境界决定成功率，失败损失修为材料 */
+/** 炼丹：按丹药境界决定成功率，失败损失修为材料；材料耗用随境界上调 */
 function buyPill(pill: Pill) {
-	if (player.xp < pill.cost || player.realmIndex < pill.minRealm) return;
-	player.xp -= pill.cost;
+	const cost = pillCost(pill);
+	if (player.xp < cost || player.realmIndex < pill.minRealm) return;
+	player.xp -= cost;
 	const rate = craftSuccessRate(pill.minRealm);
 	if (Math.random() < rate) {
 		player.pills[pill.id] += 1;
 		addLog(`丹炉开启，你成功炼制出一颗「${pill.name}」（成功率 ${Math.round(rate * 100)}%）。`);
 	} else {
-		addLog(`「${pill.name}」炼制失败，丹炉炸响，${pill.cost} 修为的药材尽数报废（成功率 ${Math.round(rate * 100)}%）。`, "danger");
+		addLog(`「${pill.name}」炼制失败，丹炉炸响，${cost} 修为的药材尽数报废（成功率 ${Math.round(rate * 100)}%）。`, "danger");
 	}
 	save();
 }
@@ -3769,7 +3805,7 @@ function closeModal() {
 		<div class="pill-card">
 			<div class="pill-header">
 				<h3 class="pill-title">丹药 · 炼丹坊</h3>
-				<span class="pill-subtitle">高阶丹药需对应境界 · 炼制有失败率，失败损失药材</span>
+				<span class="pill-subtitle">丹分凡灵宝仙神五品 · 高阶丹药需对应境界 · 炼制有失败率，失败损失药材</span>
 			</div>
 			<div class="pill-list">
 					{#each CRAFT_PILLS as pill (pill.id)}
@@ -3778,21 +3814,25 @@ function closeModal() {
 					<div class="pill-item" class:pill-locked={locked}>
 						<span class="pill-orb" style={`background: radial-gradient(circle at 35% 30%, ${pill.color}, ${pill.color}88)`}></span>
 						<div class="pill-info">
-							<div class="pill-name">{pill.name} <span class="pill-count">×{player.pills[pill.id]}</span></div>
+							<div class="pill-name">
+								{pill.name}
+								<span class="manual-chip-rarity" style={`color: ${GRADE_COLORS[pill.grade]}`}>{pill.grade}</span>
+								<span class="pill-count">×{player.pills[pill.id]}</span>
+							</div>
 							<div class="pill-desc">
 								{#if locked}
 									需达「{REALMS[pill.minRealm].name}」方可炼制
 								{:else}
 									{pill.desc} · 炼丹成功率 {craftRate}%
-									{#if pill.id === "quti"} · 已淬体 {player.qutiUsed} 次（+{player.qutiUsed * 80} 上限）{/if}
-									{#if pill.id === "zengyuan"} · 已增元 {player.zengyuanUsed} 次（+{player.zengyuanUsed * 8} 攻击）{/if}
+									{#if pill.id === "quti"} · 已淬体 {player.qutiUsed} 次（+{player.qutiUsed * 30 * currentRealm.level} 上限）{/if}
+									{#if pill.id === "zengyuan"} · 已增元 {player.zengyuanUsed} 次（+{player.zengyuanUsed * 2 * currentRealm.level} 攻击）{/if}
 								{/if}
 							</div>
 						</div>
 						<div class="pill-actions">
 							<button class="btn pill-use" disabled={player.pills[pill.id] <= 0} onclick={() => usePill(pill)}>服用</button>
-							<button class="btn pill-buy" disabled={locked || player.xp < pill.cost} onclick={() => buyPill(pill)}>
-								炼制 {pill.cost}
+							<button class="btn pill-buy" disabled={locked || player.xp < pillCost(pill)} onclick={() => buyPill(pill)}>
+								炼制 {pillCost(pill)}
 							</button>
 						</div>
 					</div>
@@ -3813,8 +3853,12 @@ function closeModal() {
 					<div class="pill-item" class:pill-locked={!afford}>
 						<span class="pill-orb" style={`background: radial-gradient(circle at 35% 30%, ${pill.color}, ${pill.color}88)`}></span>
 						<div class="pill-info">
-							<div class="pill-name">{pill.name} <span class="pill-count">×{player.pills[pill.id]}</span></div>
-							<div class="pill-desc">{pill.desc}</div>
+							<div class="pill-name">
+								{pill.name}
+								<span class="manual-chip-rarity" style={`color: ${GRADE_COLORS[pill.grade]}`}>{pill.grade}</span>
+								<span class="pill-count">×{player.pills[pill.id]}</span>
+							</div>
+							<div class="pill-desc">{pill.desc}{player.realmIndex < pill.minRealm ? ` · 需「${REALMS[pill.minRealm].name}」` : ""}</div>
 						</div>
 						<div class="pill-actions">
 							<button class="btn pill-buy" disabled={!afford} onclick={() => buyShopPill(pill)}>
