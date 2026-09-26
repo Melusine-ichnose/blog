@@ -21,7 +21,8 @@ interface Realm {
 type PillId =
 	| "juqi" | "huichun" | "ningshen" | "pojing"
 	| "quti" | "zengyuan" | "tianyuan" | "wudao" | "jiuzhuan"
-	| "shouyuan" | "souljade" | "timesand" | "mirror" | "karmaseal";
+	| "shouyuan" | "souljade" | "timesand" | "mirror" | "karmaseal"
+	| "huadu" | "peiyuan" | "humai" | "pomo" | "juling" | "bijie";
 
 interface Pill {
 	id: PillId;
@@ -32,9 +33,15 @@ interface Pill {
 	minRealm: number;
 	/** 丹药品阶：仅作展示与定价参考 */
 	grade: PillGrade;
+	/** v11 丹药分类：修炼 / 突破 / 疗伤 / 奇物（丹药面板分区展示） */
+	category: PillCategory;
 	/** 仅坊市出售：炼丹坊不可炼制、随机掉落与战斗缴获不产出 */
 	shopOnly?: boolean;
 }
+
+/** v11 丹药分类顺序（丹药界面按此分区） */
+const PILL_CATEGORIES = ["修炼", "突破", "疗伤", "奇物"] as const;
+type PillCategory = (typeof PILL_CATEGORIES)[number];
 
 /** 丹药品阶 */
 type PillGrade = "凡品" | "灵品" | "宝品" | "仙品" | "神品";
@@ -120,6 +127,7 @@ interface DifficultyCfg {
 	debtMult: number; // 因果债积累系数
 	dropBonus: number; // 掉落概率加成
 	gentleDeath: boolean; // 温和难度：突破失败只重伤不身死
+	deathRisk: number; // v11 斗法败北身殒概率（绝地专属）
 }
 
 /** 符咒类型：strike 五雷符 / seal 镇妖符 / clear 清心符 / anti 破劫符 / life 替死符 */
@@ -175,6 +183,7 @@ interface Manual {
 	desc: string;
 	xpMult?: number; // 主修：打坐收益倍率
 	breakBonus?: number; // 主修：突破成功率加成
+	gatherMult?: number; // v11 主修：打坐灵石产出倍率（商道类功法）
 	hpBonus?: number; // 炼体：气血上限
 	defBonus?: number; // 炼体：防御
 	atkBonus?: number; // 攻伐：攻击
@@ -218,6 +227,7 @@ interface PlayerState {
 	springLeft: number;
 	wudaoLeft: number;
 	veinLeft: number;
+	julingLeft: number; // v11 聚灵丹剩余息数（期间打坐灵石产出翻倍）
 	pojingActive: boolean;
 	aptitude: string | null;
 	rootCombo: string | null;
@@ -242,9 +252,6 @@ interface PlayerState {
 	lifespan: number; // 当前剩余寿元（年）
 	karma: number; // 业力（斗法/试炼胜者累积，影响天劫通过率）
 	karmaDebt: number; // 因果债（残魂玉/光阴碎片/逆术使用后累积，≥200 触发命运劫死亡）
-	memoryShards: number; // 记忆碎片（死亡结算产出，可在轮回商店兑换永久天赋）
-	rebirths: number; // 已轮回次数
-	talents: string[]; // 已解锁的轮回天赋 id
 	souljadeUsed: number; // 当前周目残魂玉已用次数（上限 3）
 	// v10 全系统字段
 	difficulty: Difficulty; // 开局难度（本周目锁定）
@@ -306,22 +313,31 @@ const SAVE_SCHEMA = 2;
  * 永久属性丹：淬体丹（+气血上限）、增元丹（+攻击）；回春丹为战斗补给。
  */
 const PILLS: Pill[] = [
-	{ id: "juqi", name: "聚气丹", color: "#34d399", desc: "服下获约 20 息周天修为（随境界精进）", cost: 50, minRealm: 0, grade: "凡品" },
-	{ id: "huichun", name: "回春丹", color: "#f87171", desc: "立即恢复 50% 气血", cost: 40, minRealm: 0, grade: "凡品" },
-	{ id: "ningshen", name: "凝神丹", color: "#60a5fa", desc: "30 息修炼收益翻倍", cost: 250, minRealm: 2, grade: "灵品" },
-	{ id: "pojing", name: "破境丹", color: "#c084fc", desc: "突破+25%；渡劫可挡一道天雷", cost: 600, minRealm: 4, grade: "灵品" },
-	{ id: "quti", name: "淬体丹", color: "#fb923c", desc: "永久气血上限 +30×当前境界（丹力随境界散开）", cost: 700, minRealm: 4, grade: "宝品" },
-	{ id: "zengyuan", name: "增元丹", color: "#ef4444", desc: "永久攻击 +2×当前境界（丹力随境界散开）", cost: 900, minRealm: 5, grade: "宝品" },
-	{ id: "tianyuan", name: "天元丹", color: "#fbbf24", desc: "服下获约 60 息周天修为（随境界精进）", cost: 1200, minRealm: 4, grade: "宝品" },
-	{ id: "wudao", name: "悟道丹", color: "#f472b6", desc: "60 息内机缘类事件概率 ×3", cost: 2500, minRealm: 6, grade: "仙品" },
-	{ id: "jiuzhuan", name: "九转金丹", color: "#e879f9", desc: "服下获约 250 息周天修为（随境界精进）", cost: 6000, minRealm: 7, grade: "仙品" },
-	// v9 黑暗轮回：寿元与因果道具
-	{ id: "shouyuan", name: "延寿丹", color: "#4ade80", desc: "服下寿元 +120 载（不逾上限）", cost: 800, minRealm: 2, grade: "灵品" },
-	{ id: "timesand", name: "光阴碎片", color: "#67e8f9", desc: "光阴回溯 · 气血回满；代价：因果债 +30", cost: 5000, minRealm: 0, grade: "神品", shopOnly: true },
-	{ id: "souljade", name: "残魂因果玉", color: "#f0abfc", desc: "被动护身 · 濒死自动满血复活（每世限 3 次）；代价：因果债 +40", cost: 8000, minRealm: 0, grade: "神品", shopOnly: true },
-	// v10 神品因果道具
-	{ id: "mirror", name: "命运窥镜", color: "#7dd3fc", desc: "窥探下一次天劫劫型；代价：因果债 +25、心魔 +10", cost: 6000, minRealm: 6, grade: "神品", shopOnly: true },
-	{ id: "karmaseal", name: "因果洗印符", color: "#fda4af", desc: "神品 · 抹除 40 点因果债；代价：损耗百年寿元、道韵溃散", cost: 9000, minRealm: 8, grade: "神品", shopOnly: true },
+	// —— 修炼 ——
+	{ id: "juqi", name: "聚气丹", category: "修炼", color: "#34d399", desc: "服下获约 20 息周天修为（随境界精进）", cost: 50, minRealm: 0, grade: "凡品" },
+	{ id: "ningshen", name: "凝神丹", category: "修炼", color: "#60a5fa", desc: "30 息修炼收益翻倍", cost: 250, minRealm: 2, grade: "灵品" },
+	{ id: "quti", name: "淬体丹", category: "修炼", color: "#fb923c", desc: "永久气血上限 +30×当前境界（丹力随境界散开）", cost: 700, minRealm: 4, grade: "宝品" },
+	{ id: "zengyuan", name: "增元丹", category: "修炼", color: "#ef4444", desc: "永久攻击 +2×当前境界（丹力随境界散开）", cost: 900, minRealm: 5, grade: "宝品" },
+	{ id: "tianyuan", name: "天元丹", category: "修炼", color: "#fbbf24", desc: "服下获约 60 息周天修为（随境界精进）", cost: 1200, minRealm: 4, grade: "宝品" },
+	{ id: "wudao", name: "悟道丹", category: "修炼", color: "#f472b6", desc: "60 息内机缘类事件概率 ×3", cost: 2500, minRealm: 6, grade: "仙品" },
+	{ id: "jiuzhuan", name: "九转金丹", category: "修炼", color: "#e879f9", desc: "服下获约 250 息周天修为（随境界精进）", cost: 6000, minRealm: 7, grade: "仙品" },
+	// —— 突破 ——
+	{ id: "pojing", name: "破境丹", category: "突破", color: "#c084fc", desc: "突破+25%；渡劫可挡一道天雷", cost: 600, minRealm: 4, grade: "灵品" },
+	{ id: "bijie", name: "避劫丹", category: "突破", color: "#fde047", desc: "天劫之中可挡下一道天雷，且不损突破之势", cost: 1500, minRealm: 5, grade: "宝品" },
+	// —— 疗伤 ——
+	{ id: "huichun", name: "回春丹", category: "疗伤", color: "#f87171", desc: "立即恢复 50% 气血", cost: 40, minRealm: 0, grade: "凡品" },
+	{ id: "huadu", name: "化毒丹", category: "疗伤", color: "#a3e635", desc: "化解丹毒 40 点，药性中和不积新毒", cost: 150, minRealm: 1, grade: "灵品" },
+	{ id: "peiyuan", name: "培元丹", category: "疗伤", color: "#fb7185", desc: "温养躯府，修复躯府损伤 30 点", cost: 400, minRealm: 3, grade: "灵品" },
+	{ id: "humai", name: "护脉丹", category: "疗伤", color: "#fda4af", desc: "护住经脉，立即恢复 80% 气血", cost: 600, minRealm: 4, grade: "宝品" },
+	// —— 奇物 ——
+	{ id: "juling", name: "聚灵丹", category: "奇物", color: "#fbbf24", desc: "90 息内打坐灵石产出翻倍", cost: 1500, minRealm: 3, grade: "灵品" },
+	{ id: "pomo", name: "破魔丹", category: "奇物", color: "#a78bfa", desc: "以正压邪，驱散心魔 25 点", cost: 900, minRealm: 5, grade: "宝品" },
+	{ id: "shouyuan", name: "延寿丹", category: "奇物", color: "#4ade80", desc: "服下寿元 +120 载（不逾上限）", cost: 800, minRealm: 2, grade: "灵品" },
+	// —— 神品因果道具（仅坊市有售）——
+	{ id: "timesand", name: "光阴碎片", category: "奇物", color: "#67e8f9", desc: "光阴回溯 · 气血回满；代价：因果债 +30", cost: 5000, minRealm: 0, grade: "神品", shopOnly: true },
+	{ id: "souljade", name: "残魂因果玉", category: "奇物", color: "#f0abfc", desc: "被动护身 · 濒死自动满血复活（每世限 3 次）；代价：因果债 +40", cost: 8000, minRealm: 0, grade: "神品", shopOnly: true },
+	{ id: "mirror", name: "命运窥镜", category: "奇物", color: "#7dd3fc", desc: "窥探下一次天劫劫型；代价：因果债 +25、心魔 +10", cost: 6000, minRealm: 6, grade: "神品", shopOnly: true },
+	{ id: "karmaseal", name: "因果洗印符", category: "奇物", color: "#fda4af", desc: "神品 · 抹除 40 点因果债；代价：损耗百年寿元、道韵溃散", cost: 9000, minRealm: 8, grade: "神品", shopOnly: true },
 ];
 
 /** 炼丹成功率：随丹药所需境界递减（97% → 67%） */
@@ -384,6 +400,8 @@ const ENEMY_TEMPLATES: EnemyTemplate[] = [
 
 /** 挑战冷却（息） */
 const BATTLE_COOLDOWN = 20;
+/** v11 试炼塔独立短冷却（原与斗法台共用 20 息，过长劝退） */
+const TOWER_COOLDOWN = 5;
 /** 挑战所需最低气血比例 */
 const MIN_HP_RATIO = 0.3;
 
@@ -399,6 +417,13 @@ const MANUALS: Manual[] = [
 	{ id: "jingang", name: "金刚不坏身", slot: "body", rarity: "宝品", color: "#fbbf24", desc: "佛门炼体绝学，气血上限 +350、防御 +14", hpBonus: 350, defBonus: 14, hint: "首胜赤焰妖王" },
 	{ id: "jiuzhuanx", name: "九转玄功", slot: "core", rarity: "天品", color: "#e879f9", desc: "道门无上心法，打坐收益 +40%、突破 +8%", xpMult: 1.4, breakBonus: 0.08, hint: "首胜九幽冥蛟" },
 	{ id: "zhuxian", name: "诛仙剑诀", slot: "attack", rarity: "天品", color: "#ef4444", desc: "上古攻伐第一，攻击 +35、造成伤害 +18%", atkBonus: 35, dmgMult: 1.18, hint: "修炼遗府奇遇" },
+	// v11 功法扩充：奇缘 / 秘境可得
+	{ id: "shenfa", name: "踏云身法", slot: "body", rarity: "凡品", color: "#94a3b8", desc: "身轻如燕步生风，气血上限 +60、防御 +6", hpBonus: 60, defBonus: 6, hint: "秘境遗府奇缘" },
+	{ id: "shangdao", name: "商道聚灵术", slot: "core", rarity: "凡品", color: "#fbbf24", desc: "以商入道，打坐灵石产出 +30%", gatherMult: 1.3, hint: "奇缘事件可得" },
+	{ id: "chanxin", name: "禅心不染经", slot: "core", rarity: "灵品", color: "#a5f3fc", desc: "禅意涤心魔不侵，打坐收益 +10%、突破 +2%", xpMult: 1.1, breakBonus: 0.02, hint: "奇缘事件可得" },
+	{ id: "guixi", name: "龟息养元功", slot: "body", rarity: "灵品", color: "#7dd3fc", desc: "气息绵长如龟眠，气血上限 +220、防御 +8", hpBonus: 220, defBonus: 8, hint: "秘境遗府奇缘" },
+	{ id: "jianyi", name: "剑心通明诀", slot: "attack", rarity: "宝品", color: "#fbbf24", desc: "以心驭剑人剑合一，攻击 +20、造成伤害 +12%", atkBonus: 20, dmgMult: 1.12, hint: "秘境遗府奇缘" },
+	{ id: "yinlei", name: "引雷真解", slot: "attack", rarity: "宝品", color: "#7dd3fc", desc: "引天雷淬剑锋，攻击 +16、造成伤害 +10%", atkBonus: 16, dmgMult: 1.1, hint: "渡劫有缘人可得" },
 ];
 
 /** 斗法台首通固定掉落的功法（对手 id → 功法 id） */
@@ -469,30 +494,18 @@ const EQUIP_POOL: { tid: string; name: string; slot: EquipSlot; rarity: EquipRar
 // ==================== 坊市 ====================
 
 /** 坊市出售的丹药与因果道具（价格 = cost/10 取整到十位、最低 50 灵石） */
-const SHOP_PILL_IDS: PillId[] = ["juqi", "huichun", "ningshen", "pojing", "shouyuan", "timesand", "souljade", "mirror", "karmaseal"];
+const SHOP_PILL_IDS: PillId[] = ["juqi", "huichun", "huadu", "ningshen", "pojing", "shouyuan", "peiyuan", "humai", "juling", "pomo", "bijie", "timesand", "souljade", "mirror", "karmaseal"];
 const SHOP_PILLS: Pill[] = PILLS.filter((p) => SHOP_PILL_IDS.includes(p.id));
 /** 炼丹坊可炼的丹药（shopOnly 的因果道具不可炼制、不掉落） */
 const CRAFT_PILLS: Pill[] = PILLS.filter((p) => !p.shopOnly);
 
-// ==================== 轮回天赋 ====================
+// v11 丹药界面分类过滤（修炼/突破/疗伤/奇物，避免列表过长难找）
+type PillFilter = "全部" | PillCategory;
+const PILL_FILTERS: PillFilter[] = ["全部", "修炼", "突破", "疗伤", "奇物"];
+let craftFilter = $state<PillFilter>("全部");
+let shopFilter = $state<PillFilter>("全部");
 
-/** 轮回天赋：死亡后以记忆碎片兑换的永久被动，跨周目生效 */
-interface RebirthTalent {
-	id: string;
-	name: string;
-	color: string;
-	desc: string;
-	cost: number; // 记忆碎片价格
-}
-
-const REBIRTH_TALENTS: RebirthTalent[] = [
-	{ id: "rich", name: "富甲一方", color: "#fbbf24", desc: "每世开局自带 500 灵石", cost: 30 },
-	{ id: "fast", name: "慧根天成", color: "#4ade80", desc: "打坐修为收益 +12%", cost: 50 },
-	{ id: "long", name: "长生道基", color: "#67e8f9", desc: "寿元上限 +20%", cost: 50 },
-	{ id: "body", name: "金刚道胎", color: "#f87171", desc: "气血上限 +150", cost: 40 },
-	{ id: "kwash", name: "善业加身", color: "#a78bfa", desc: "业力积累 -40%", cost: 40 },
-	{ id: "causal", name: "因果不沾", color: "#f0abfc", desc: "因果债积累 -30%", cost: 60 },
-];
+// ==================== v10 难度 / 符咒 / 灵虫常量 ====================
 
 /** 死因：血战陨落 / 寿元耗尽 / 天劫陨落 / 因果崩溃 / 兵解转世 */
 type DeathCause = "battle" | "lifespan" | "thunder" | "debt" | "bingjie";
@@ -508,9 +521,9 @@ const DEATH_TEXTS: Record<DeathCause, { title: string; desc: string }> = {
 
 /** 开局三难度：风险与收益对等，本周目锁定 */
 const DIFFICULTIES: DifficultyCfg[] = [
-	{ id: "gentle", name: "温和修道", color: "#4ade80", desc: "新手推荐 · 修炼略缓，敌人伤害 -30%，因果反噬减半，突破失败只重伤不身死，掉落 +20%", xpMult: 0.9, enemyMult: 0.7, debtMult: 0.5, dropBonus: 0.2, gentleDeath: true },
-	{ id: "normal", name: "乱世求索", color: "#60a5fa", desc: "标准难度 · 风险与收益均衡，机缘与危机并存", xpMult: 1, enemyMult: 1, debtMult: 1, dropBonus: 0, gentleDeath: false },
-	{ id: "hard", name: "绝地轮回", color: "#f87171", desc: "硬核难度 · 修炼 +20%，敌人伤害 +30%，因果反噬翻倍，掉落 +50%，高风险高回报", xpMult: 1.2, enemyMult: 1.3, debtMult: 2, dropBonus: 0.5, gentleDeath: false },
+	{ id: "gentle", name: "温和修道", color: "#4ade80", desc: "新手推荐 · 修炼略缓，敌人伤害 -30%，因果反噬减半，突破失败只重伤不身死，掉落 +20%", xpMult: 0.9, enemyMult: 0.7, debtMult: 0.5, dropBonus: 0.2, gentleDeath: true, deathRisk: 0 },
+	{ id: "normal", name: "乱世求索", color: "#60a5fa", desc: "标准难度 · 风险与收益均衡，机缘与危机并存", xpMult: 1, enemyMult: 1, debtMult: 1, dropBonus: 0, gentleDeath: false, deathRisk: 0 },
+	{ id: "hard", name: "绝地轮回", color: "#f87171", desc: "硬核难度 · 修炼 +20%，敌人伤害 +45%，因果反噬 2.5 倍，掉落 +50%，斗法败北折寿十载且可能身殒，高风险高回报", xpMult: 1.2, enemyMult: 1.45, debtMult: 2.5, dropBonus: 0.5, gentleDeath: false, deathRisk: 0.25 },
 ];
 
 /** 大境界内四小阶：按修为对下一境界需求的比例划分 */
@@ -561,17 +574,18 @@ const FEED_AMOUNT = 25;
 interface Companion {
 	id: string;
 	name: string;
+	gender: "男" | "女"; // v11 结识时可选道侣性别
 	color: string;
 	trait: string;
 	desc: string;
 }
 const COMPANIONS: Companion[] = [
-	{ id: "su", name: "苏挽晴", color: "#f9a8d4", trait: "清冷剑修", desc: "剑心通明，协同作战时锋芒最盛" },
-	{ id: "xiao", name: "萧无尘", color: "#7dd3fc", trait: "丹鼎道种", desc: "精通炼丹，结缘后灵物资助不断" },
-	{ id: "bai", name: "白鹿鸣", color: "#4ade80", trait: "蛮荒体修", desc: "气血如龙，并肩渡劫可分担雷威" },
-	{ id: "shen", name: "沈青梧", color: "#c084fc", trait: "符箓世家", desc: "符道大家，符纸灵材随手相赠" },
-	{ id: "ye", name: "夜玄", color: "#fb7185", trait: "魔道散修", desc: "亦正亦邪，手段狠辣收益惊人" },
-	{ id: "jiang", name: "姜离", color: "#fbbf24", trait: "器宗传人", desc: "炼器宗师，道基稳固修炼安稳" },
+	{ id: "su", name: "苏挽晴", gender: "女", color: "#f9a8d4", trait: "清冷剑修", desc: "剑心通明，协同作战时锋芒最盛" },
+	{ id: "xiao", name: "萧无尘", gender: "男", color: "#7dd3fc", trait: "丹鼎道种", desc: "精通炼丹，结缘后灵物资助不断" },
+	{ id: "bai", name: "白鹿鸣", gender: "男", color: "#4ade80", trait: "蛮荒体修", desc: "气血如龙，并肩渡劫可分担雷威" },
+	{ id: "shen", name: "沈青梧", gender: "女", color: "#c084fc", trait: "符箓世家", desc: "符道大家，符纸灵材随手相赠" },
+	{ id: "ye", name: "夜玄", gender: "男", color: "#fb7185", trait: "魔道散修", desc: "亦正亦邪，手段狠辣收益惊人" },
+	{ id: "jiang", name: "姜离", gender: "女", color: "#fbbf24", trait: "器宗传人", desc: "炼器宗师，道基稳固修炼安稳" },
 ];
 /** 结识花费与赠礼花费 */
 const MEET_COST = 500;
@@ -651,6 +665,7 @@ const EMPTY_PILLS: Record<PillId, number> = {
 	juqi: 0, huichun: 0, ningshen: 0, pojing: 0, quti: 0,
 	zengyuan: 0, tianyuan: 0, wudao: 0, jiuzhuan: 0,
 	shouyuan: 0, souljade: 0, timesand: 0, mirror: 0, karmaseal: 0,
+	huadu: 0, peiyuan: 0, humai: 0, pomo: 0, juling: 0, bijie: 0,
 };
 
 /** 全新角色初始状态（初次进入、兵解转世、导入兜底时共用） */
@@ -666,6 +681,7 @@ function makeFreshPlayer(difficulty: Difficulty = "normal"): PlayerState {
 		springLeft: 0,
 		wudaoLeft: 0,
 		veinLeft: 0,
+		julingLeft: 0,
 		pojingActive: false,
 		aptitude: null,
 		rootCombo: null,
@@ -691,9 +707,6 @@ function makeFreshPlayer(difficulty: Difficulty = "normal"): PlayerState {
 		lifespan: REALMS[0].lifespan,
 		karma: 0,
 		karmaDebt: 0,
-		memoryShards: 0,
-		rebirths: 0,
-		talents: [],
 		souljadeUsed: 0,
 		// v10 全系统默认值
 		difficulty,
@@ -713,8 +726,6 @@ function makeFreshPlayer(difficulty: Difficulty = "normal"): PlayerState {
 		scout: false,
 		fateCheat: false,
 	};
-	// 轮回天赋「富甲一方」开局生效
-	if (fresh.talents.includes("rich")) fresh.stones += 500;
 	return fresh;
 }
 
@@ -733,7 +744,7 @@ let aptitudeResult = $state<Aptitude | null>(null);
 let rootComboResult = $state<RootCombo | null>(null);
 let physiqueResult = $state<Physique | null>(null);
 let wheelIndex = $state(0);
-// v10 开局难度选择（轮回后保留的 memoryShards/talents 仍在，难度重选）
+// v10 开局难度选择（死亡/兵解后一切归零，需重选难度重测天命）
 let chosenDifficulty = $state<Difficulty | null>(null);
 
 // ---- 雷劫（主动突破，保留交互）----
@@ -760,11 +771,12 @@ let enhanceMsg = $state("");
 // ---- 闭关归来结算弹窗 ----
 let offlineReport = $state<{ duration: string; xp: number; stones: number } | null>(null);
 
-// ---- v9 轮回结算 / 轮回商店弹窗 ----
+// ---- v9 死亡结算弹窗（v11 移除轮回继承，仅展示本世修行总结）----
 let showRebirthModal = $state(false);
 let deathCause = $state<DeathCause | null>(null);
-let rebirthReport = $state<{ shards: number; cause: DeathCause } | null>(null);
-let showRebirthShop = $state(false);
+let rebirthReport = $state<{
+	cause: DeathCause; realm: string; xp: number; wins: number; floors: number; breaths: number; clears: number;
+} | null>(null);
 
 // ==================== v10.2 游戏内功能菜单（分页切换，压缩页面长度）====================
 type GameMenuId = "battle" | "worm" | "fate" | "pill" | "log";
@@ -819,8 +831,6 @@ const demonWeight = $derived.by(() => {
 const coreManual = $derived(MANUALS.find((m) => m.id === player.equipped.core) ?? null);
 const bodyManual = $derived(MANUALS.find((m) => m.id === player.equipped.body) ?? null);
 const attackManual = $derived(MANUALS.find((m) => m.id === player.equipped.attack) ?? null);
-
-const hasTalent = (id: string) => player.talents.includes(id);
 
 /** 当前难度配置 */
 const difficultyCfg = $derived(DIFFICULTIES.find((d) => d.id === player.difficulty) ?? DIFFICULTIES[1]);
@@ -899,16 +909,40 @@ const critRate = $derived(Math.min(35, 5 + currentRealm.level * 2));
 const dodgeRate = $derived(Math.min(25, 3 + Math.floor(currentRealm.level * 1.5)));
 const damageReduce = $derived(Math.min(40, Math.round((def / (def + 260)) * 100)));
 
+// ==================== v11 名词志 ====================
+/** 名词志词条：悬停状态条或打开弹窗查看释义 */
+const GLOSSARY: { term: string; desc: string }[] = [
+	{ term: "修为", desc: "修行积累的经验。囤积不可超过下次突破所需的一倍半，溢出部分散逸天地。" },
+	{ term: "灵石", desc: "修行界通货。打坐、福地、斗法赏金、事件皆可获取；赠礼、购丹、炼制皆需它。" },
+	{ term: "气血", desc: "肉身存续之本。归零触发濒死判定——替死符、残魂因果玉可救命，否则血溅当场。" },
+	{ term: "寿元", desc: "剩余阳寿（年）。随时间流逝，斗法/秘境亦折耗；归零神魂枯萎。延寿丹与福地灵泉可补。" },
+	{ term: "心魔", desc: "败北、雷劫、杀招所积。50 起削突破率，80 起更狠且可能走火入魔。清心符、静心蝉可解。" },
+	{ term: "丹毒", desc: "服丹积累的药毒。50 起削修炼收益，打坐自然消解，化毒丹可速解。" },
+	{ term: "业力", desc: "斗法试炼胜者沾染的杀业。80 起触发业火劫（败雷额外折寿）；渡劫成功可洗去三成。" },
+	{ term: "因果债", desc: "使用逆天道具/秘术的代价。150 起削修炼，满 200 触发命运劫当场身死。因果洗印符可抹除。" },
+	{ term: "声望", desc: "江湖善恶观感（−50~50）。正道行事得加成，黑市勾当遭折损；部分事件选项受其影响。" },
+	{ term: "躯府", desc: "躯府三虫的温养状态。饥饿会反噬需定期喂食；道衍杀招需三虫齐鸣。" },
+	{ term: "灵虫", desc: "躯府温养的灵虫，共三槽。提供修炼/战斗/定心增益，可放生换灵石。" },
+	{ term: "遁走", desc: "斗法中七成五概率全身而退；失手则硬吃一记杀招。打不过时的赌命选项。" },
+	{ term: "天劫", desc: "大境界突破的三道天雷。劫型由业力/因果债/心魔/寿元动态决定；破劫符、避劫丹可挡雷。" },
+	{ term: "定神", desc: "冲关前的小游戏：指针近中心时点下，每息至多 +4% 成功率，三息为限。" },
+	{ term: "命线已改", desc: "真仙秘术「小段命运篡改」之效：下次大境界突破无雷直过。" },
+	{ term: "福地", desc: "洞天福地，可升级。挂机产出修为灵石；3 级起灵泉滋养补寿元。" },
+];
+/** 按词条名取释义（模板 title 用） */
+function gloss(term: string): string {
+	return GLOSSARY.find((g) => g.term === term)?.desc ?? "";
+}
+let showGlossaryModal = $state(false);
+
 // ---- v10 心魔 / 丹毒 ----
 /** 心魔 debuff：≥50 突破 -10%；≥80 再 -10% */
 const demonBreakPenalty = $derived(player.demon >= 80 ? 0.2 : player.demon >= 50 ? 0.1 : 0);
 /** 丹毒 debuff：≥50 修炼 ×0.9；≥80 ×0.75 */
 const toxinMult = $derived(player.toxin >= 80 ? 0.75 : player.toxin >= 50 ? 0.9 : 1);
 
-/** 寿元上限 = 境界基础 × 长生道基天赋加成 */
-const lifespanMax = $derived(
-	Math.round(currentRealm.lifespan * (hasTalent("long") ? 1.2 : 1)),
-);
+/** 寿元上限 = 境界基础寿元 */
+const lifespanMax = $derived(currentRealm.lifespan);
 /** 寿元剩余比例（驱动状态条颜色与 debuff） */
 const lifespanRatio = $derived(lifespanMax > 0 ? Math.max(0, player.lifespan / lifespanMax) : 0);
 /** 暮年 debuff：寿元 <30% 修炼 ×0.85；<10% 残烛 ×0.65 */
@@ -943,8 +977,7 @@ const breathXp = $derived(
 			toxinMult *
 			wormBonus.xpMult *
 			partnerBonus.xpMult *
-			difficultyCfg.xpMult *
-			(hasTalent("fast") ? 1.12 : 1),
+			difficultyCfg.xpMult,
 	),
 );
 
@@ -955,9 +988,9 @@ const weaponBonus = $derived(player.equip.weapon ? equipValue(player.equip.weapo
 const armorBonus = $derived(player.equip.armor ? equipValue(player.equip.armor) : 0);
 const artifactBonus = $derived(player.equip.artifact ? equipValue(player.equip.artifact) : 0);
 
-/** 气血上限：境界 + 淬体丹（30×境界/颗，随境界散开）+ 炼体功法 + 法宝槽 + 灵虫 + 道侣羁绊 + 轮回天赋「金刚道胎」 */
+/** 气血上限：境界 + 淬体丹（30×境界/颗，随境界散开）+ 炼体功法 + 法宝槽 + 灵虫 + 道侣羁绊 */
 const maxHp = $derived(
-	100 + currentRealm.level * 60 + player.qutiUsed * 30 * currentRealm.level + (bodyManual?.hpBonus ?? 0) + artifactBonus + wormBonus.hp + partnerBonus.hp + (hasTalent("body") ? 150 : 0),
+	100 + currentRealm.level * 60 + player.qutiUsed * 30 * currentRealm.level + (bodyManual?.hpBonus ?? 0) + artifactBonus + wormBonus.hp + partnerBonus.hp,
 );
 /** 攻击：境界 + 增元丹（2×境界/颗）+ 武器 + 攻伐功法 + 灵虫 + 道侣，再乘战体加成 */
 const atk = $derived(
@@ -989,7 +1022,7 @@ const sixDims = $derived.by(() => {
 	const soul = soulBase + player.wudaoLeft * 2 + player.thunderPassed * 40 + player.towerFloor * 6; // 神魂力量
 	const daoBase = Math.max(60, player.realmIndex * 60);
 	const dao = player.realmIndex * 60 + player.manuals.length * 55 + Object.values(player.defeated).filter(Boolean).length * 20; // 道韵感悟
-	const causal = 200 - Math.min(180, player.karmaDebt + player.karma * 0.5) + (hasTalent("causal") ? 120 : 0); // 因果抗性
+	const causal = 200 - Math.min(180, player.karmaDebt + player.karma * 0.5); // 因果抗性
 	const heart = Math.max(0, 100 - player.demon) + wormBonus.demonCut * 3 + (currentPhysique?.demonImmune ? 400 : 0); // 心魔抗性
 	return [
 		{ key: "肉身", value: norm(flesh, fleshBase) },
@@ -1014,7 +1047,7 @@ const meditationPaused = $derived(
 		enhanceId !== null ||
 		offlineReport !== null ||
 		showRebirthModal ||
-		showRebirthShop ||
+		showChoiceEvent !== null ||
 		needCreation,
 );
 
@@ -1057,6 +1090,7 @@ function load() {
 				...player,
 				...data,
 				pills: { ...EMPTY_PILLS, ...(data.pills ?? {}) },
+				julingLeft: typeof data.julingLeft === "number" ? data.julingLeft : 0,
 				cooldowns: data.cooldowns ?? {},
 				// 旧档没有功法/首通数据：补发入门心法
 				manuals: Array.isArray(data.manuals) && data.manuals.length > 0 ? data.manuals : ["tuna"],
@@ -1072,9 +1106,6 @@ function load() {
 				lifespan: typeof data.lifespan === "number" ? data.lifespan : REALMS[data.realmIndex ?? 0]?.lifespan ?? 100,
 				karma: typeof data.karma === "number" ? data.karma : 0,
 				karmaDebt: typeof data.karmaDebt === "number" ? data.karmaDebt : 0,
-				memoryShards: typeof data.memoryShards === "number" ? data.memoryShards : 0,
-				rebirths: typeof data.rebirths === "number" ? data.rebirths : 0,
-				talents: Array.isArray(data.talents) ? data.talents : [],
 				souljadeUsed: typeof data.souljadeUsed === "number" ? data.souljadeUsed : 0,
 				// v10 旧档兜底
 				difficulty: data.difficulty === "gentle" || data.difficulty === "hard" ? data.difficulty : "normal",
@@ -1114,6 +1145,7 @@ function load() {
 				player.totalBreaths = old.totalBreaths ?? old.totalCultivations ?? 0;
 				player.pills = { ...EMPTY_PILLS, ...(old.pills ?? {}) };
 				player.ningshenLeft = old.ningshenLeft ?? 0;
+				player.julingLeft = old.julingLeft ?? 0;
 				player.thunderPassed = old.thunderPassed ?? 0;
 				player.battlesWon = old.battlesWon ?? 0;
 				player.log = old.log ?? [];
@@ -1165,14 +1197,14 @@ function healHp(amount: number) {
 
 // ==================== v9 业力 / 因果债 / 寿元 / 轮回 ====================
 
-/** 业力累积：斗法/试炼胜者沾染杀业，善业加身天赋可削减 */
+/** 业力累积：斗法/试炼胜者沾染杀业 */
 function addKarma(amount: number) {
-	player.karma += Math.max(1, Math.round(amount * (hasTalent("kwash") ? 0.6 : 1)));
+	player.karma += Math.max(1, Math.round(amount));
 }
 
-/** 因果债累积：使用逆天道具/秘术产生，善业不沾天赋与难度系数共同削减；≥200 触发命运劫死亡 */
+/** 因果债累积：使用逆天道具/秘术产生，难度系数放大；≥200 触发命运劫死亡 */
 function addKarmaDebt(amount: number) {
-	player.karmaDebt += Math.max(1, Math.round(amount * (hasTalent("causal") ? 0.7 : 1) * difficultyCfg.debtMult));
+	player.karmaDebt += Math.max(1, Math.round(amount * difficultyCfg.debtMult));
 	if (player.karmaDebt >= 200) {
 		die("debt");
 	}
@@ -1211,7 +1243,7 @@ function checkNearDeath(cause: DeathCause): boolean {
 	return true;
 }
 
-/** 死亡结算：计算记忆碎片，打开轮回殿 */
+/** 死亡结算：记录本世修行总结并弹出结算弹窗（v11 一切归零，无跨世继承） */
 function die(cause: DeathCause) {
 	stopMeditation();
 	battle = null;
@@ -1221,28 +1253,25 @@ function die(cause: DeathCause) {
 	saveModalMode = null;
 
 	const firstClearCount = Object.keys(player.defeated).filter((k) => player.defeated[k]).length;
-	const shards = 50 + player.realmIndex * 15 + player.towerFloor * 2 + firstClearCount * 10;
-	player.memoryShards += shards;
-	player.rebirths += 1;
 	deathCause = cause;
-	rebirthReport = { shards, cause };
+	rebirthReport = {
+		cause,
+		realm: REALMS[player.realmIndex].name,
+		xp: player.xp,
+		wins: player.battlesWon,
+		floors: player.towerFloor,
+		breaths: player.totalBreaths,
+		clears: firstClearCount,
+	};
 	showRebirthModal = true;
 
 	const t = DEATH_TEXTS[cause];
-	addLog(`${t.title} —— ${t.desc} 获得 ${shards} 记忆碎片。`, "danger");
+	addLog(`${t.title} —— ${t.desc}`, "danger");
 	save();
 }
 
-/** 转世重生：保留记忆碎片/天赋/轮回次数，清空本世一切并重新选择难度、重测天命 */
-let pendingRebirthMeta: { memoryShards: number; rebirths: number; talents: string[] } | null = null;
-
+/** 转世重修：清空本世一切，回到难度选择重新开始（v11 移除轮回继承，每次都是全新开始） */
 function reincarnate() {
-	// 暂存跨周目数据，待难度选择后写入新角色
-	pendingRebirthMeta = {
-		memoryShards: player.memoryShards,
-		rebirths: player.rebirths,
-		talents: [...player.talents],
-	};
 	chosenDifficulty = null;
 	aptitudeResult = null;
 	rootComboResult = null;
@@ -1254,34 +1283,15 @@ function reincarnate() {
 	showRebirthModal = false;
 	deathCause = null;
 	rebirthReport = null;
-	addLog("真灵飘入幽冥，前世因果尽散，唯记忆碎片与轮回天赋长存。请重选难度，再测天命。", "warning");
+	addLog("前世因果尽散，真灵重入轮回。请重选难度，再测天命——此世一切从零开始。", "warning");
 	save();
 }
 
-/** 创角第一步：选定本周目难度并生成新角色（继承跨周目数据） */
+/** 创角第一步：选定本周目难度并生成全新角色 */
 function pickDifficulty(d: Difficulty) {
 	chosenDifficulty = d;
-	const fresh = makeFreshPlayer(d);
-	if (pendingRebirthMeta) {
-		fresh.memoryShards = pendingRebirthMeta.memoryShards;
-		fresh.rebirths = pendingRebirthMeta.rebirths;
-		fresh.talents = pendingRebirthMeta.talents;
-		if (fresh.talents.includes("rich")) fresh.stones += 500;
-		pendingRebirthMeta = null;
-		addLog(`第 ${fresh.rebirths + 1} 世 · 你以「${DIFFICULTIES.find((x) => x.id === d)?.name}」之身重入轮回。`, "warning");
-	}
-	player = fresh;
-	save();
-}
-
-/** 轮回商店：消耗记忆碎片购买永久天赋（跨周目生效） */
-function buyTalent(t: RebirthTalent) {
-	if (player.talents.includes(t.id) || player.memoryShards < t.cost) return;
-	player.memoryShards -= t.cost;
-	player.talents.push(t.id);
-	// 「富甲一方」购买后立即补发本周目灵石
-	if (t.id === "rich") player.stones += 500;
-	addLog(`轮回殿参悟成功：「${t.name}」已烙印神魂，生生世世生效。`, "success");
+	player = makeFreshPlayer(d);
+	addLog(`你以「${DIFFICULTIES.find((x) => x.id === d)?.name}」之身踏上道途。`, "info");
 	save();
 }
 
@@ -1418,7 +1428,7 @@ function scoutSecret() {
 	save();
 }
 
-/** 探索秘境：消耗 5 年寿元，冷却 30 息，高风险高回报；六古域按修为分层 */
+/** 探索秘境：消耗 5 年寿元，冷却 10 息（v11 下调），高风险高回报；六古域按修为分层 */
 function exploreSecret() {
 	if ((player.cooldowns["secret"] ?? 0) > 0) return;
 	if (player.hp < maxHp * MIN_HP_RATIO) {
@@ -1427,7 +1437,7 @@ function exploreSecret() {
 	}
 	addLifespan(-5);
 	if (showRebirthModal) return; // 寿元耗尽直接入轮回
-	player.cooldowns["secret"] = 30;
+	player.cooldowns["secret"] = 10;
 	// 六大古域：淬体练气入天南，洞虚以上方可踏足灵界
 	const placeIdx = Math.min(SECRET_PLACES.length - 1, Math.floor(player.realmIndex / 2));
 	const place = SECRET_PLACES[placeIdx];
@@ -1444,12 +1454,20 @@ function exploreSecret() {
 		player.stones += gain;
 		report += `你发现一条废弃灵石矿脉，采掘得 ${gain} 灵石。`;
 	} else if (roll < 0.34) {
-		// 前辈遗府：修为 + 符咒
+		// 前辈遗府：修为 + 符咒；v11 有三成半概率翻出失传功法
 		const gain = breathXp * 40;
 		player.xp += gain;
 		const t = TALISMANS[Math.random() < 0.5 ? 0 : 3]; // 五雷符 / 破劫符
 		player.talismans[t.id] += 1;
 		report += `你误入古修遗府，参悟残卷得 ${gain} 修为，并拾得一张「${t.name}」。`;
+		if (Math.random() < 0.35) {
+			const unowned = MANUALS.filter((m) => !player.manuals.includes(m.id));
+			const picked = unowned[Math.floor(Math.random() * unowned.length)];
+			if (picked) {
+				grantManual(picked.id);
+				report += `遗府密匣中还藏着一册《${picked.name}》！`;
+			}
+		}
 	} else if (roll < 0.48) {
 		// 灵虫巢穴：高层秘境保底更高品阶
 		const w = rollWormDrop(placeIdx >= 4 ? 2 : placeIdx >= 2 ? 1 : 0);
@@ -1505,17 +1523,30 @@ function exploreSecret() {
 
 // ==================== v10.1 道侣羁绊 ====================
 
-/** 云游结识：随机结识一位尚未结缘的道侣 */
+// v11 结识性别选择面板
+let showMeetModal = $state(false);
+
+/** 云游结识：先弹出性别选择，再从对应池随机结识 */
 function meetCompanion() {
-	const unmet = COMPANIONS.filter((c) => !player.companions.includes(c.id));
-	if ((player.cooldowns["meet"] ?? 0) > 0 || unmet.length === 0 || player.stones < MEET_COST) return;
+	if ((player.cooldowns["meet"] ?? 0) > 0 || player.companions.length >= COMPANIONS.length || player.stones < MEET_COST) return;
+	showMeetModal = true;
+}
+
+/** 确认结识指定性别的道侣（随机取一位未结缘者） */
+function confirmMeetCompanion(gender: "男" | "女") {
+	const unmet = COMPANIONS.filter((c) => !player.companions.includes(c.id) && c.gender === gender);
+	if ((player.cooldowns["meet"] ?? 0) > 0 || unmet.length === 0 || player.stones < MEET_COST) {
+		showMeetModal = false;
+		return;
+	}
 	player.stones -= MEET_COST;
 	player.cooldowns["meet"] = 60;
 	const c = unmet[Math.floor(Math.random() * unmet.length)];
 	player.companions.push(c.id);
 	player.favor[c.id] = 10;
-	addLog(`你云游四方，与「${c.name}」（${c.trait}）一见投缘，结为道侣（好感 10）。`, "success");
+	addLog(`你云游四方，与「${c.name}」（${gender}修 · ${c.trait}）一见投缘，结为道侣（好感 10）。`, "success");
 	save();
+	showMeetModal = false;
 }
 
 /** 赠礼：100 灵石 +5 好感，满 100 为止 */
@@ -1710,6 +1741,64 @@ function unwearEquip(slot: EquipSlot) {
 	save();
 }
 
+// ==================== v11 法宝 / 灵虫卖出 ====================
+
+/** 法宝折价：base×5 + 每级强化 +30 灵石 */
+function equipSellValue(item: EquipItem): number {
+	return item.base * 5 + item.enhance * 30;
+}
+
+/** 从行囊卖出法宝换灵石 */
+function sellEquipFromBag(item: EquipItem) {
+	const idx = player.bag.findIndex((i) => i.id === item.id);
+	if (idx < 0) return;
+	const worth = equipSellValue(item);
+	if (!confirm(`确定将「${item.name}」卖与坊市吗？可得 ${worth} 灵石。`)) return;
+	player.bag.splice(idx, 1);
+	player.stones += worth;
+	addLog(`「${item.name}」已卖与坊市，得 ${worth} 灵石。`, "info");
+	save();
+}
+
+/** 卖出身上法宝：取下即折价，不再入囊 */
+function sellEquippedEquip(slot: EquipSlot) {
+	const cur = player.equip[slot];
+	if (!cur) return;
+	const worth = equipSellValue(cur);
+	if (!confirm(`确定卖出身上「${cur.name}」（${equipEffectText(cur)}）吗？可得 ${worth} 灵石。`)) return;
+	player.equip[slot] = null;
+	player.stones += worth;
+	player.hp = Math.min(player.hp, maxHp);
+	addLog(`你将身上「${cur.name}」卖与坊市，得 ${worth} 灵石。`, "info");
+	save();
+}
+
+/** 灵虫放生折价表：按品质 凡品80 / 灵品200 / 宝器500 / 仙器1200 */
+const WORM_SELL_PRICE = [80, 200, 500, 1200];
+
+/** 灵虫按品质折算灵石（未知虫按凡品计） */
+function wormSellValue(id: string): number {
+	const w = WORM_POOL.find((x) => x.id === id);
+	if (!w) return 80;
+	return WORM_SELL_PRICE[Math.max(0, EQUIP_RARITIES.indexOf(w.rarity))] ?? 80;
+}
+
+/** 放生灵虫：按品质折算灵石，若在躯府中则自动卸下 */
+function releaseWorm(id: string) {
+	const idx = player.worms.indexOf(id);
+	if (idx < 0) return;
+	const w = WORM_POOL.find((x) => x.id === id);
+	if (!w) return;
+	const worth = wormSellValue(id);
+	if (!confirm(`确定放生灵虫「${w.name}」吗？可得 ${worth} 灵石。`)) return;
+	const slot = player.wormEquip.indexOf(id);
+	if (slot >= 0) player.wormEquip[slot] = null;
+	player.worms.splice(idx, 1);
+	player.stones += worth;
+	addLog(`你将灵虫「${w.name}」放归天地，其衔来 ${worth} 灵石以谢宿主。`, "info");
+	save();
+}
+
 /** 强化费用与成功率（失败不掉级不损毁，上限 +9） */
 function enhanceCostOf(item: EquipItem): number {
 	return 50 * (item.enhance + 1);
@@ -1785,6 +1874,21 @@ function formatOfflineDuration(ms: number): string {
 	return h > 0 ? `${h} 小时 ${m} 分钟` : `${Math.max(1, m)} 分钟`;
 }
 
+/** v11 修为溢出封顶：修为最多囤到下一境界需求的 150%，超出部分散逸天地（真仙无封顶） */
+let xpCapWarned = false;
+function capXpOverflow() {
+	const next = REALMS[player.realmIndex + 1];
+	if (!next) return;
+	const cap = next.requiredXp * 1.5;
+	if (player.xp > cap) {
+		player.xp = cap;
+		if (!xpCapWarned) {
+			xpCapWarned = true;
+			addLog("修为已囤至瓶颈极限，再难寸进——溢出的修为正散逸天地，速速突破！", "warning");
+		}
+	}
+}
+
 /**
  * 离线闭关结算：超过 120 秒未在线才结算，封顶 12 小时；
  * 修为 = 在线打坐每分钟修为（基础速率，不含丹药 buff、不触发事件）× 50%，
@@ -1805,11 +1909,12 @@ function settleOffline() {
 	const minutes = capped / 60000;
 	// 在线速率：每息 breathXp、每 2 秒一息 → 每分钟 30 息；离线取 50%
 	const xpGain = Math.round(breathXp * 30 * 0.5 * minutes);
-	// 在线灵石：每 60 息（2 分钟）产出 (5+境界×3) → 每分钟一半；离线再取 50%
-	const stoneGain = Math.floor(((5 + player.realmIndex * 3) / 4) * minutes);
-	// v10 福地离线产出：每级每分钟 4 灵石
-	const landGain = player.landLevel * 4 * minutes;
+	// 在线灵石：每 60 息（2 分钟）产出 (10+境界×6) → 每分钟一半；离线再取 50%（v11 上调）
+	const stoneGain = Math.floor(((10 + player.realmIndex * 6) / 4) * minutes);
+	// v11 福地离线产出：每级每分钟 6 灵石（在线为 12）
+	const landGain = player.landLevel * 6 * minutes;
 	player.xp += xpGain;
+	capXpOverflow();
 	player.stones += stoneGain + landGain;
 	player.hp = maxHp;
 	offlineReport = { duration: formatOfflineDuration(elapsed), xp: xpGain, stones: stoneGain + landGain };
@@ -2227,6 +2332,512 @@ function rollRandomEvent(base: number): EventResult {
 	return {};
 }
 
+// ==================== v11 分支抉择事件 ====================
+
+/** 抉择选项：生成时依据玩家状态算好 disabled，run 执行并返回结算文案 */
+interface ChoiceOption {
+	label: string;
+	hint?: string;
+	disabled?: boolean;
+	run: () => string;
+}
+
+/** 抉择事件：点击选项走向不同收益与风险 */
+interface ChoiceEvent {
+	id: string;
+	title: string;
+	color: string;
+	desc: string;
+	weight: number;
+	minRealm: number;
+	options: ChoiceOption[];
+}
+
+let showChoiceEvent = $state<ChoiceEvent | null>(null);
+let choiceResultText = $state<string | null>(null);
+
+/** 依据当前玩家状态实时构建抉择事件池（境界门槛 / 灵石判断即时计算） */
+function buildChoiceEvents(): ChoiceEvent[] {
+	const lv = currentRealm.level;
+	const rate = 100 * (lv + 1); // 事件灵石基准随境界水涨船高
+	const list: ChoiceEvent[] = [];
+
+	// 1. 灵虫巢穴（灵虫获取途径）
+	list.push({
+		id: "wormnest", title: "灵虫巢穴", color: "#4ade80", weight: 12, minRealm: 1,
+		desc: "荒洞深处传来细密虫鸣，洞壁灵光点点——似有灵虫栖居于此。",
+		options: [
+			{
+				label: "探入捕捉",
+				hint: "四成五被咬伤",
+				run: () => {
+					if (Math.random() < 0.55) {
+						const w = rollWormDrop(lv >= 5 ? 2 : 1);
+						if (w) {
+							gainWorm(w);
+							return `你屏息探入，一举收服「${w.name}」（${w.rarity}）！`;
+						}
+					}
+					damageHp(maxHp * 0.1);
+					return "巢中灵虫暴起伤人，你被咬伤狼狈退出（气血 -10%）。";
+				},
+			},
+			{
+				label: "焚巢取卵",
+				hint: `得 ${rate} 灵石 · 业力+2 声望-2`,
+				run: () => {
+					player.stones += rate;
+					addKarma(2);
+					player.reputation = Math.max(-50, player.reputation - 2);
+					return `你一把火熏出虫卵卖与药商，得 ${rate} 灵石——洞中哀鸣不绝，罪过罪过。`;
+				},
+			},
+			{ label: "悄然离去", run: () => "你识趣退开，虫鸣渐渐远去。" },
+		],
+	});
+
+	// 2. 法宝拍卖（法宝获取途径）
+	list.push({
+		id: "auction2", title: "蒙尘法宝", color: "#fbbf24", weight: 10, minRealm: 2,
+		desc: `拍卖行正在压轴一件蒙尘法器，起拍价 ${300 * (lv + 1)} 灵石，来源神秘。`,
+		options: [
+			{
+				label: `出价竞得（${300 * (lv + 1)} 灵石）`,
+				hint: "六成得宝，四成被截胡退半款",
+				disabled: player.stones < 300 * (lv + 1),
+				run: () => {
+					const price = 300 * (lv + 1);
+					player.stones -= price;
+					if (Math.random() < 0.6) {
+						const e = rollEquipDrop(lv >= 5 ? 1 : 0);
+						if (gainEquip(e)) return `你以 ${price} 灵石拍得「${e.name}」（${e.rarity}），天缘契合！`;
+						return `拍得「${e.name}」，但行囊已满，折价换成了灵石。`;
+					}
+					const back = Math.floor(price / 2);
+					player.stones += back;
+					return `一名蒙面修士天价截胡！拍卖行退你 ${back} 灵石以表歉意。`;
+				},
+			},
+			{ label: "转身离开", run: () => "钱财乃身外之物，你潇洒离场。" },
+		],
+	});
+
+	// 3. 灵药园
+	list.push({
+		id: "herbgarden", title: "灵药园", color: "#a3e635", weight: 10, minRealm: 1,
+		desc: "一座灵药园依山而建，园主倚着锄头打盹，药香沁人心脾。",
+		options: [
+			{
+				label: "顺手牵丹",
+				hint: "六成五得丹，三成五被抓",
+				run: () => {
+					if (Math.random() < 0.65) {
+						const pool = availablePills();
+						const pill = pool[Math.floor(Math.random() * pool.length)];
+						if (pill) {
+							player.pills[pill.id] += 1;
+							addKarma(1);
+							return `你悄然摘得一颗「${pill.name}」，转身遁走。`;
+						}
+					}
+					const fine = Math.min(player.stones, 150 * (lv + 1));
+					player.stones -= fine;
+					player.reputation = Math.max(-50, player.reputation - 3);
+					return `园主猛然惊醒喝破空追来！你仓皇脱身，散落 ${fine} 灵石。`;
+				},
+			},
+			{
+				label: `照价买丹（${200 * (lv + 1)} 灵石）`,
+				hint: "得一颗随机丹药",
+				disabled: player.stones < 200 * (lv + 1),
+				run: () => {
+					const price = 200 * (lv + 1);
+					const pool = availablePills();
+					const pill = pool[Math.floor(Math.random() * pool.length)];
+					if (!pill) return "园主摊手：园中灵药皆未长成。";
+					player.stones -= price;
+					player.pills[pill.id] += 1;
+					player.reputation = Math.min(50, player.reputation + 1);
+					return `你以 ${price} 灵石买下一颗「${pill.name}」，园主还多送你两片灵叶。`;
+				},
+			},
+			{
+				label: "提醒园主防盗",
+				hint: "声望 +2，赠化毒丹",
+				run: () => {
+					player.reputation = Math.min(50, player.reputation + 2);
+					player.pills.huadu += 1;
+					return "你轻咳一声替园主望风，园主感激不尽，赠你一颗「化毒丹」。";
+				},
+			},
+		],
+	});
+
+	// 4. 落难修士
+	list.push({
+		id: "stranded", title: "落难修士", color: "#60a5fa", weight: 10, minRealm: 2,
+		desc: "一名浑身浴血的修士倒在道旁，微弱气息中带着一丝戒备。",
+		options: [
+			{
+				label: "出手相救（200 灵石药费）",
+				hint: "声望 +3，可能获厚报",
+				disabled: player.stones < 200,
+				run: () => {
+					player.stones -= 200;
+					player.reputation = Math.min(50, player.reputation + 3);
+					if (Math.random() < 0.5) {
+						const gain = 300 * (lv + 1);
+						player.stones += gain;
+						return `修士伤愈后报出师门名号，赠你 ${gain} 灵石作谢。`;
+					}
+					const gain = breathXp * 30;
+					player.xp += gain;
+					return `修士临别传授一段行功心得，你获益 ${gain} 修为。`;
+				},
+			},
+			{
+				label: "趁火打劫",
+				hint: "得灵石 · 业力+6 声望-5 · 三成五遭同伴伏击",
+				run: () => {
+					const gain = 250 * (lv + 1);
+					player.stones += gain;
+					addKarma(6);
+					player.reputation = Math.max(-50, player.reputation - 5);
+					if (Math.random() < 0.35) {
+						damageHp(maxHp * 0.25);
+						addDemon(5);
+						return `你搜出 ${gain} 灵石，其同伴却从林中暴起偷袭！你带伤杀出（气血 -25%，心魔 +5）。`;
+					}
+					return `你搜出 ${gain} 灵石扬长而去，身后传来咒骂与哭嚎。`;
+				},
+			},
+			{ label: "视而不见", run: () => "你垂目走过，心中微有不安。" },
+		],
+	});
+
+	// 5. 邪修拦路
+	list.push({
+		id: "evilway", title: "邪修拦路", color: "#f87171", weight: 10, minRealm: 1,
+		desc: "一名邪修拦住去路，阴笑着索要「买路财」。",
+		options: [
+			{
+				label: "硬碰硬",
+				hint: "以当前气血开战，胜得灵石",
+				run: () => {
+					const res = simulateBattle();
+					player.hp = Math.min(player.hp, Math.max(1, res.remainHp));
+					if (res.win) {
+						const gain = 200 * (lv + 1);
+						player.stones += gain;
+						addKarma(3);
+						return `恶战 ${res.rounds} 回合，你将邪修斩于马下，缴获 ${gain} 灵石！`;
+					}
+					damageHp(maxHp * 0.25);
+					addDemon(5);
+					return `邪修道行深不可测，恶战 ${res.rounds} 回合后你负伤遁走（气血 -25%，心魔 +5）。`;
+				},
+			},
+			{
+				label: `破财消灾（${150 * (lv + 1)} 灵石）`,
+				disabled: player.stones < 150 * (lv + 1),
+				run: () => {
+					const price = 150 * (lv + 1);
+					player.stones -= price;
+					return `你甩出 ${price} 灵石，邪修掂了掂重量，让开了道路。`;
+				},
+			},
+			{
+				label: "施展遁法",
+				hint: "七成全身而退",
+				run: () => {
+					if (Math.random() < 0.7) return "你身形一晃，借山势摆脱了纠缠。";
+					damageHp(maxHp * 0.2);
+					return "遁光未成已被邪修追上，一记黑焰拍在背心（气血 -20%）！";
+				},
+			},
+		],
+	});
+
+	// 6. 陨铁天降
+	list.push({
+		id: "meteorite", title: "陨铁天降", color: "#94a3b8", weight: 8, minRealm: 2,
+		desc: "夜空中一颗流星拖着青焰坠入深谷，谷底一块陨铁尚有余温。",
+		options: [
+			{
+				label: "吞炼陨铁",
+				hint: "攻击永久 +2×境界 · 心魔 +8",
+				run: () => {
+					const gain = 2 * currentRealm.level;
+					player.zengyuanUsed += 1;
+					addDemon(8);
+					return `你以秘法将陨铁熔入四肢百骸，攻击永久 +${gain}——代价是心魔滋生 +8。`;
+				},
+			},
+			{
+				label: "卖与坊市",
+				hint: `得 ${400 * (lv + 1)} 灵石`,
+				run: () => {
+					const gain = 400 * (lv + 1);
+					player.stones += gain;
+					return `陨铁在坊市被炼器师高价收购，你得 ${gain} 灵石。`;
+				},
+			},
+		],
+	});
+
+	// 7. 黑市悬赏
+	list.push({
+		id: "bounty", title: "黑市悬赏", color: "#f0abfc", weight: 8, minRealm: 3,
+		desc: "黑市墙上贴着一张悬赏令：取一名叛逃修士首级，赏金丰厚。",
+		options: [
+			{
+				label: "接下悬赏",
+				hint: "以当前气血开战 · 业力+8 声望-4",
+				run: () => {
+					const res = simulateBattle();
+					player.hp = Math.min(player.hp, Math.max(1, res.remainHp));
+					if (res.win) {
+						const gain = 500 * (lv + 1);
+						player.stones += gain;
+						addKarma(8);
+						player.reputation = Math.max(-50, player.reputation - 4);
+						return `你循线追杀三昼夜，终于得手。黑市如约奉上 ${gain} 灵石。`;
+					}
+					damageHp(maxHp * 0.3);
+					return "叛逃修士修为远超预想，你血战不敌，拖着残躯逃回（气血 -30%）。";
+				},
+			},
+			{
+				label: "向正道举报",
+				hint: `声望 +3，得 ${150 * (lv + 1)} 灵石义赏`,
+				run: () => {
+					const gain = 150 * (lv + 1);
+					player.stones += gain;
+					player.reputation = Math.min(50, player.reputation + 3);
+					return `正道循报缉拿叛修，义赏 ${gain} 灵石落入你手。`;
+				},
+			},
+			{ label: "一笑而过", run: () => "多一事不如少一事，你揭下了目光。" },
+		],
+	});
+
+	// 8. 云游长老论道（NPC 互动 · 禅心不染经来源）
+	list.push({
+		id: "elder", title: "云游长老", color: "#a5f3fc", weight: 9, minRealm: 1,
+		desc: "一位白眉长老在山亭讲道，声如洪钟，听者如云。",
+		options: [
+			{
+				label: "静心恭听",
+				hint: "修为精进，或悟《禅心不染经》",
+				run: () => {
+					const gain = breathXp * 30;
+					player.xp += gain;
+					if (Math.random() < 0.4 && grantManual("chanxin")) {
+						return `长老一句偈语点醒梦中人——你顿悟《禅心不染经》，另获 ${gain} 修为！`;
+					}
+					return `你听完一卷妙法，如醍醐灌顶，修为 +${gain}。`;
+				},
+			},
+			{
+				label: `供养灵茶（${100 * (lv + 1)} 灵石）`,
+				hint: "大段感悟 + 心魔 -5",
+				disabled: player.stones < 100 * (lv + 1),
+				run: () => {
+					const price = 100 * (lv + 1);
+					const gain = breathXp * 80;
+					player.stones -= price;
+					player.xp += gain;
+					player.demon = Math.max(0, player.demon - 5);
+					return `一盏灵茶换来半日倾谈，你修为 +${gain}，心结也解开了几分（心魔 -5）。`;
+				},
+			},
+			{ label: "不感兴趣", run: () => "道不同不相为谋，你绕亭而过。" },
+		],
+	});
+
+	// 9. 行脚商人（灵虫 / 法宝 / 商道功法来源）
+	list.push({
+		id: "peddler", title: "行脚商人", color: "#fb923c", weight: 9, minRealm: 1,
+		desc: "货郎担上奇光流转——虫笼、法器、残卷应有尽有，就是不便宜。",
+		options: [
+			{
+				label: `买下虫笼（${250 * (lv + 1)} 灵石）`,
+				hint: "必得一只灵虫",
+				disabled: player.stones < 250 * (lv + 1),
+				run: () => {
+					player.stones -= 250 * (lv + 1);
+					const w = rollWormDrop(lv >= 5 ? 2 : 1);
+					if (w) {
+						gainWorm(w);
+						return `你买下虫笼，笼中「${w.name}」（${w.rarity}）冲你拱了拱须。`;
+					}
+					return "笼中灵虫奄奄一息，商人讪讪退了半款。";
+				},
+			},
+			{
+				label: `买下法器（${400 * (lv + 1)} 灵石）`,
+				hint: "必得一件法宝",
+				disabled: player.stones < 400 * (lv + 1),
+				run: () => {
+					player.stones -= 400 * (lv + 1);
+					const e = rollEquipDrop(lv >= 5 ? 1 : 0);
+					if (gainEquip(e)) return `你买下法器，擦去浮尘——竟是「${e.name}」（${e.rarity}）！`;
+					return `买下「${e.name}」，但行囊已满，折价换成了灵石。`;
+				},
+			},
+			{
+				label: "攀谈行情",
+				hint: "或悟《商道聚灵术》",
+				run: () => {
+					if (Math.random() < 0.35 && grantManual("shangdao")) {
+						return "商人见你有缘，传你一部《商道聚灵术》——原来赚钱也是修行！";
+					}
+					const gain = 80 * (lv + 1);
+					player.stones += gain;
+					return `你与商人相谈甚欢，还倒手一批灵物小赚 ${gain} 灵石。`;
+				},
+			},
+		],
+	});
+
+	// 10. 街角老丐（NPC 互动 · 龟息养元功来源）
+	list.push({
+		id: "beggar", title: "街角老丐", color: "#9ca3af", weight: 9, minRealm: 1,
+		desc: "街角老丐破衣烂衫，一双眸子却深邃如渊，似藏乾坤。",
+		options: [
+			{
+				label: "赠灵石 100",
+				hint: "声望 +3 · 四成五得高人馈赠",
+				disabled: player.stones < 100,
+				run: () => {
+					player.stones -= 100;
+					player.reputation = Math.min(50, player.reputation + 3);
+					if (Math.random() < 0.45) {
+						if (Math.random() < 0.5 && grantManual("guixi")) {
+							return "老丐哈哈大笑：「小友心善！」袖中飞出一册《龟息养元功》。";
+						}
+						player.pills.tianyuan += 2;
+						return "老丐掌心一翻，两颗「天元丹」凭空而至——原来是位隐世高人！";
+					}
+					return "老丐拱手称谢，深藏功与名。";
+				},
+			},
+			{
+				label: "一脚踢开",
+				hint: "声望 -4 · 业力 +2",
+				run: () => {
+					player.reputation = Math.max(-50, player.reputation - 4);
+					addKarma(2);
+					return "老丐不闪不避，只幽幽看了你一眼——那一眼让你心头莫名一寒。";
+				},
+			},
+			{ label: "绕道而行", run: () => "你压低头颅匆匆走过，不去招惹。" },
+		],
+	});
+
+	// 11. 道侣相伴修行（好感互动：助力或共险）
+	const met = COMPANIONS.filter((c) => player.companions.includes(c.id));
+	if (met.length > 0) {
+		const c = met[Math.floor(Math.random() * met.length)];
+		const f = player.favor[c.id] ?? 0;
+		list.push({
+			id: "companion_bond", title: `${c.name} · 相伴修行`, color: c.color, weight: 7, minRealm: 0,
+			desc: `${c.name}（${c.trait}）遣传音符相邀：愿与你共入静室论道，或同赴一处新开的秘府历练。（好感 ${f}/100）`,
+			options: [
+				{
+					label: "静室论道",
+					hint: "好感 +6 · 修为小进",
+					run: () => {
+						player.favor[c.id] = Math.min(100, (player.favor[c.id] ?? 0) + 6);
+						const gain = 30 * (lv + 1);
+						player.xp += gain;
+						return `你们彻夜论道，契鸣如钟——好感 +6，修为 +${gain}。`;
+					},
+				},
+				{
+					label: "同闯秘府",
+					hint: "灵石丰厚 · 三成受伤",
+					run: () => {
+						const gain = rate * 2;
+						player.stones += gain;
+						player.favor[c.id] = Math.min(100, (player.favor[c.id] ?? 0) + 3);
+						if (Math.random() < 0.3) {
+							player.hp = Math.max(1, Math.floor(player.hp * 0.7));
+							return `秘府凶险，${c.name}护你周全却受了暗伤——灵石 +${gain}，好感 +3，气血 -30%。`;
+						}
+						return `二人合力，满载而归——灵石 +${gain}，好感 +3。`;
+					},
+				},
+				{
+					label: "婉言推拒",
+					hint: "好感 -4",
+					run: () => {
+						player.favor[c.id] = Math.max(0, (player.favor[c.id] ?? 0) - 4);
+						return `${c.name}眼底掠过一丝落寞：「道友既忙，改日再会罢。」好感 -4。`;
+					},
+				},
+			],
+		});
+
+		// 12. 道侣传讯求援（高风险高回报：好感大幅波动）
+		list.push({
+			id: "companion_danger", title: `${c.name} · 传讯求援`, color: "#fb7185", weight: 6, minRealm: 0,
+			desc: `${c.name}的传音符急促震颤：「仇家寻衅，我被困于断魂崖，速来！」——驰援是生死之交，亦是生死之险。`,
+			options: [
+				{
+					label: "仗义驰援",
+					hint: "好感 +10 · 三成重伤",
+					run: () => {
+						player.favor[c.id] = Math.min(100, (player.favor[c.id] ?? 0) + 10);
+						if (Math.random() < 0.3) {
+							player.hp = Math.max(1, Math.floor(player.hp * 0.5));
+							return `血战脱围，${c.name}眼含泪光——好感 +10，但你负伤不轻（气血 -50%）。`;
+						}
+						return `你及时赶到，一剑退敌。${c.name}紧握你的手久久无言——好感 +10。`;
+					},
+				},
+				{
+					label: `掷金雇援（${200 * (lv + 1)} 灵石）`,
+					hint: "破财免险 · 好感 +5",
+					disabled: player.stones < 200 * (lv + 1),
+					run: () => {
+						player.stones -= 200 * (lv + 1);
+						player.favor[c.id] = Math.min(100, (player.favor[c.id] ?? 0) + 5);
+						return `你重金雇来两位散修驰援。${c.name}虽平安归来，却知你未曾亲至——好感 +5。`;
+					},
+				},
+				{
+					label: "闭门不出",
+					hint: "好感 -15 · 声望 -5",
+					run: () => {
+						player.favor[c.id] = Math.max(0, (player.favor[c.id] ?? 0) - 15);
+						player.reputation = Math.max(-50, player.reputation - 5);
+						return `你终究没有出手。${c.name}九死一生独自归来，自此再未传讯——好感 -15，风声传开，声望 -5。`;
+					},
+				},
+			],
+		});
+	}
+
+	return list;
+}
+
+/** 选择分支：执行并展示结果（弹窗停留在结算文案上） */
+function pickChoiceOption(idx: number) {
+	const ev = showChoiceEvent;
+	if (!ev) return;
+	const opt = ev.options[idx];
+	if (!opt || opt.disabled) return;
+	choiceResultText = opt.run();
+	save();
+}
+
+/** 关闭抉择弹窗 */
+function closeChoiceEvent() {
+	showChoiceEvent = null;
+	choiceResultText = null;
+}
+
 // ==================== 打坐 ====================
 
 let breathTimer: ReturnType<typeof setInterval> | null = null;
@@ -2238,6 +2849,7 @@ function breathTick() {
 	let xpGain = breathXp + Math.floor(Math.random() * (breathXp * 0.6 + 1));
 
 	if (player.ningshenLeft > 0) { xpGain *= 2; player.ningshenLeft -= 1; }
+	if (player.julingLeft > 0) player.julingLeft -= 1;
 	if (player.springLeft > 0) { xpGain *= 2; player.springLeft -= 1; }
 	if (player.veinLeft > 0) { xpGain *= 3; player.veinLeft -= 1; }
 	if (player.wudaoLeft > 0) player.wudaoLeft -= 1;
@@ -2256,14 +2868,30 @@ function breathTick() {
 		addLog(CULTIVATE_TEXTS[Math.floor(Math.random() * CULTIVATE_TEXTS.length)]);
 	}
 
+	// v11 奇遇抉择：偶发弹出分支事件面板，打坐随之暂停（约每半分钟一次机会）
+	if (!showChoiceEvent && Math.random() < 0.03) {
+		const pool = buildChoiceEvents().filter((e) => player.realmIndex >= e.minRealm);
+		const total = pool.reduce((s, e) => s + e.weight, 0);
+		let r = Math.random() * total;
+		for (const e of pool) {
+			r -= e.weight;
+			if (r <= 0) {
+				showChoiceEvent = e;
+				choiceResultText = null;
+				break;
+			}
+		}
+	}
+
 	player.xp = Math.max(0, player.xp + xpGain);
+	capXpOverflow();
 	player.totalBreaths += 1;
-	// 每 60 息凝练一批灵石（打坐的灵石产出，受灵虫/福地/道侣加成）
+	// 每 60 息凝练一批灵石（打坐的灵石产出，受功法/灵虫/福地/道侣/聚灵丹加成；v11 上调）
 	if (player.totalBreaths % 60 === 0) {
-		const base = (5 + player.realmIndex * 3) * wormBonus.gatherMult * partnerBonus.xpMult;
+		const base = (10 + player.realmIndex * 6) * (coreManual?.gatherMult ?? 1) * wormBonus.gatherMult * partnerBonus.xpMult * (player.julingLeft > 0 ? 2 : 1);
 		player.stones += Math.round(base);
-		// v10 福地灵脉：每级额外产出 8 灵石
-		if (player.landLevel > 0) player.stones += 8 * player.landLevel;
+		// v11 福地灵脉：每级额外产出 12 灵石
+		if (player.landLevel > 0) player.stones += 12 * player.landLevel;
 		// v10 打坐调理：丹毒 -2、心魔 -1；灵虫饥饿 +2
 		player.toxin = Math.max(0, player.toxin - 2);
 		addDemon(-1);
@@ -2338,8 +2966,7 @@ function portal(node: HTMLElement) {
 			saveModalMode !== null ||
 			enhanceId !== null ||
 			offlineReport !== null ||
-			showRebirthModal ||
-			showRebirthShop
+			showRebirthModal
 		) {
 		const prev = document.body.style.overflow;
 		document.body.style.overflow = "hidden";
@@ -2369,6 +2996,26 @@ function usePill(pill: Pill) {
 		case "ningshen":
 			player.ningshenLeft += 30;
 			addLog("你服下一颗凝神丹，接下来 30 息修炼收益翻倍。", "success");
+			break;
+		case "juling":
+			player.julingLeft += 90;
+			addLog("你服下一颗聚灵丹，90 息内打坐灵石产出翻倍。", "success");
+			break;
+		case "huadu":
+			player.toxin = Math.max(0, player.toxin - 40);
+			addLog("你服下一颗化毒丹，一股清凉化去体内丹毒（丹毒 -40）。", "success");
+			break;
+		case "peiyuan":
+			player.bodyWound = Math.max(0, player.bodyWound - 30);
+			addLog("你服下一颗培元丹，温热药力修复受损躯府（损伤 -30）。", "success");
+			break;
+		case "pomo":
+			player.demon = Math.max(0, player.demon - 25);
+			addLog("你服下一颗破魔丹，浩然正气涤荡神魂（心魔 -25）。", "success");
+			break;
+		case "humai":
+			healHp(maxHp * 0.8);
+			addLog("你服下一颗护脉丹，护脉之力贯通全身，气血恢复 80%。", "success");
 			break;
 		case "pojing":
 			player.pojingActive = true;
@@ -2441,8 +3088,8 @@ function usePill(pill: Pill) {
 			save();
 			return;
 	}
-	// v10 服药积丹毒：品阶越高丹毒越重（因果道具走因果债，不积丹毒）
-	const noToxin = pill.id === "timesand" || pill.id === "mirror" || pill.id === "karmaseal";
+	// v10 服药积丹毒：品阶越高丹毒越重（化毒丹药性中和；因果道具走因果债，不积丹毒）
+	const noToxin = pill.id === "timesand" || pill.id === "mirror" || pill.id === "karmaseal" || pill.id === "huadu";
 	if (!noToxin) addToxin(pill.id === "shouyuan" ? 2 : pill.minRealm >= 4 ? 8 : pill.minRealm >= 2 ? 5 : 2);
 	save();
 }
@@ -2502,7 +3149,13 @@ function getEnemy(tpl: EnemyTemplate): EnemyStats {
 		base.atk = Math.round(base.atk * 0.6);
 		base.def = Math.max(0, Math.round(base.def * 0.6));
 		base.power = Math.round(base.hp * 0.5 + base.atk * 4 + base.def * 3);
+		return { tpl, level, ...base };
 	}
+	// v11 强敌浮动：气血 1.1~1.5 倍随机波动（攻随之缓涨），绝地难度整体再凶三分——劲敌不期而遇
+	const surge = (1.1 + Math.random() * 0.4) * (difficultyCfg.id === "hard" ? 1.1 : difficultyCfg.id === "normal" ? 1.05 : 1);
+	base.hp = Math.round(base.hp * surge);
+	base.atk = Math.round(base.atk * (1 + (surge - 1) * 0.6));
+	base.power = Math.round(base.hp * 0.5 + base.atk * 4 + base.def * 3);
 	return { tpl, level, ...base };
 }
 
@@ -2635,13 +3288,26 @@ function battleUsePill() {
 	if (!enemyStrikeBack()) save();
 }
 
-/** 玩家操作：主动撤退（无奖励无惩罚，不进入冷却） */
+/** 玩家操作：遁走（v11 七成五全身而退；失手则硬吃一记杀招并消耗一合，打不过也能赌命逃离） */
 function battleRetreat() {
 	const b = battle;
 	if (!b || b.status !== "fighting") return;
-	b.status = "retreat";
-	battlePushLog("你虚晃一招跳下斗法台，抽身而退。", "warning");
-	addLog(`你从与「${b.enemyName}」的斗法中主动撤退，无功无过。`, "warning");
+	if (Math.random() < 0.75) {
+		b.status = "retreat";
+		battlePushLog("你虚晃一招跳下斗法台，金蝉脱壳，全身而退。", "warning");
+		addLog(`你从与「${b.enemyName}」的斗法中全身而退，无功无过。`, "warning");
+	} else {
+		const dmg = rollEnemyDamage(b.eatk);
+		player.hp = Math.max(0, player.hp - dmg);
+		battlePushLog(`遁走失手！「${b.enemyName}」一记杀招扫中你的后心，失去 ${dmg} 点气血。`, "danger");
+		b.rounds += 1;
+		if (player.hp <= 0) {
+			save();
+			if (b.source === "tower") finishTowerLose();
+			else finishBattleLose();
+			return;
+		}
+	}
 	save();
 }
 
@@ -2720,8 +3386,8 @@ function finishBattleWin(tpl: EnemyTemplate) {
 	player.reputation += 1;
 	if (bestCompanion && (player.favor[bestCompanion.id] ?? 0) < 100) player.favor[bestCompanion.id] += 1;
 
-	// 灵石赏金：50×(对手序号+1)，首通翻倍
-	const stoneGain = 50 * (idx + 1) * (first ? 2 : 1);
+	// 灵石赏金：70×(对手序号+1)，首通翻倍（v11 上调）
+	const stoneGain = 70 * (idx + 1) * (first ? 2 : 1);
 	player.stones += stoneGain;
 	b.stoneGain = stoneGain;
 
@@ -2773,9 +3439,43 @@ function finishBattleLose() {
 	b.status = "lose";
 	b.reward = loss;
 	battlePushLog(`你灵力枯竭倒在台上，损失 ${loss} 修为，气血见底。`, "danger");
-	addLog(`斗法台 · 你不敌「${b.enemyName}」（战力 ${b.epower}），力竭败退，损失 ${loss} 修为。`, "danger");
-	// v10 败北滋生心魔 +8
-	addDemon(8);
+	// v11 绝地轮回：败北代价惨重——折寿十载、心魔深种，两成五概率当场身殒
+	if (difficultyCfg.id === "hard") {
+		addLifespan(-10);
+		addDemon(12);
+		if (showRebirthModal) {
+			save();
+			return; // 折寿后寿元耗尽，addLifespan 内已触发轮回
+		}
+		battlePushLog("绝地轮回·你被打落高台，气息萎靡，折寿十载，心魔更噬三分！", "danger");
+		addLog(`绝地轮回 · 败于「${b.enemyName}」之手，折寿 10 年、心魔 +12。`, "danger");
+		if (Math.random() < difficultyCfg.deathRisk) {
+			save();
+			player.hp = 0;
+			checkNearDeath("battle");
+			return;
+		}
+	} else {
+		// v10 败北滋生心魔 +8
+		addDemon(8);
+		addLog(`斗法台 · 你不敌「${b.enemyName}」（战力 ${b.epower}），力竭败退，损失 ${loss} 修为。`, "danger");
+	}
+	// v11 道侣共赴危难：乱世败北一成五、绝地败北两成五概率道侣重伤身死（优先殒落好感最低者；温和难度道侣无恙）
+	if (player.companions.length > 0 && difficultyCfg.id !== "easy") {
+		const bondRisk = difficultyCfg.id === "hard" ? 0.25 : 0.15;
+		if (Math.random() < bondRisk) {
+			const sorted = [...player.companions].sort((a, b) => (player.favor[a] ?? 0) - (player.favor[b] ?? 0));
+			const dead = sorted[0];
+			const dc = COMPANIONS.find((x) => x.id === dead);
+			player.companions = player.companions.filter((id) => id !== dead);
+			delete player.favor[dead];
+			if (dc) {
+				battlePushLog(`${dc.name}为护你硬撼致命一击，就此香消玉殒……`, "danger");
+				addLog(`道侣殒落 · 「${dc.name}」为护你身死道消，此恨绵绵无尽期。`, "danger");
+				addDemon(15);
+			}
+		}
+	}
 	save();
 	// 血量归零 → 濒死判定（替死符/残魂玉复活或血溅当场入轮回；入轮回会关闭战斗弹窗）
 	checkNearDeath("battle");
@@ -2840,20 +3540,20 @@ function startTowerBattle() {
 	battlePushLog(`你踏入试炼塔第 ${n} 层，守将现身（战力 ${e.power}）！`, "warning");
 }
 
-/** 试炼胜利：层数+1、灵石 40+15×N、小额修为；每 5 层保底掉法宝（至少灵品）；冷却复用 tower 键 */
+/** 试炼胜利：层数+1、灵石 60+20×N、小额修为；每 5 层保底掉法宝（至少灵品）；冷却独立 5 息 */
 function finishTowerWin() {
 	const b = battle;
 	if (!b) return;
 	const n = b.towerN;
 	player.towerFloor = Math.max(player.towerFloor, n);
 	player.battlesWon += 1;
-	player.cooldowns["tower"] = BATTLE_COOLDOWN;
+	player.cooldowns["tower"] = TOWER_COOLDOWN;
 	// v9 试炼胜者 +2 业力；v10 胜战涤荡心魔 -2；v10.1 声望与羁绊
 	addKarma(2);
 	addDemon(-2);
 	player.reputation += 1;
 	if (bestCompanion && (player.favor[bestCompanion.id] ?? 0) < 100) player.favor[bestCompanion.id] += 1;
-	const stoneGain = 40 + 15 * n;
+	const stoneGain = 60 + 20 * n;
 	player.stones += stoneGain;
 	const xpGain = Math.round(b.epower * 0.4);
 	player.xp += xpGain;
@@ -2939,6 +3639,7 @@ function doImport() {
 		...makeFreshPlayer(),
 		...data,
 		pills: { ...EMPTY_PILLS, ...(data.pills ?? {}) },
+		julingLeft: typeof data.julingLeft === "number" ? data.julingLeft : 0,
 		cooldowns: data.cooldowns ?? {},
 		manuals: Array.isArray(data.manuals) && data.manuals.length > 0 ? data.manuals : ["tuna"],
 		equipped: { core: "tuna", body: null, attack: null, ...(data.equipped ?? {}) },
@@ -2954,9 +3655,6 @@ function doImport() {
 		lifespan: typeof data.lifespan === "number" ? data.lifespan : REALMS[data.realmIndex ?? 0]?.lifespan ?? 100,
 		karma: typeof data.karma === "number" ? data.karma : 0,
 		karmaDebt: typeof data.karmaDebt === "number" ? data.karmaDebt : 0,
-		memoryShards: typeof data.memoryShards === "number" ? data.memoryShards : 0,
-		rebirths: typeof data.rebirths === "number" ? data.rebirths : 0,
-		talents: Array.isArray(data.talents) ? data.talents : [],
 		souljadeUsed: typeof data.souljadeUsed === "number" ? data.souljadeUsed : 0,
 		// v10 旧档兜底
 		difficulty: data.difficulty === "gentle" || data.difficulty === "hard" ? data.difficulty : "normal",
@@ -2986,6 +3684,100 @@ function doImport() {
 }
 
 // ==================== 突破与雷劫 ====================
+
+// v11 定神小游戏：冲关前可点「定神」至多三次，指针越近中心加成越高（总上限 12%）
+let focusGameActive = $state(false);
+let focusPtr = $state(50); // 指针位置 0~100，中心 50 为满分点
+let focusDir = 1; // 摆动方向（非响应式）
+let focusHits = $state(0); // 已定神次数
+let focusBonus = $state(0); // 累计加成百分比（0~12）
+let focusTimer: ReturnType<typeof setInterval> | null = null;
+
+/** 指针摆动循环：速度随定神次数递增，越点越难 */
+function startFocusLoop() {
+	stopFocusLoop();
+	focusTimer = setInterval(() => {
+		const step = 8 + focusHits * 4;
+		let next = focusPtr + focusDir * step;
+		if (next >= 100) {
+			next = 100;
+			focusDir = -1;
+		} else if (next <= 0) {
+			next = 0;
+			focusDir = 1;
+		}
+		focusPtr = next;
+	}, 40);
+}
+function stopFocusLoop() {
+	if (focusTimer !== null) {
+		clearInterval(focusTimer);
+		focusTimer = null;
+	}
+}
+
+/** 点「定神」：按指针离中心距离折算 0~4% 加成 */
+function focusHit() {
+	if (!focusGameActive || focusHits >= 3) return;
+	const dist = Math.abs(focusPtr - 50);
+	const gain = Math.round((4 - (dist / 50) * 4) * 10) / 10;
+	focusBonus = Math.min(12, Math.round((focusBonus + gain) * 10) / 10);
+	focusHits += 1;
+	if (focusHits >= 3) stopFocusLoop();
+}
+
+/** 凝神冲关：结算定神加成后掷出突破结果 */
+function startBreakthroughRoll() {
+	if (!focusGameActive) return;
+	focusGameActive = false;
+	stopFocusLoop();
+	lastSuccessRate = Math.min(0.95, lastSuccessRate + focusBonus / 100);
+	const usedPojing = player.pojingActive;
+	player.pojingActive = false;
+	const rate = lastSuccessRate;
+
+	setTimeout(() => {
+		if (Math.random() < rate) {
+			const oldMax = lifespanMax;
+			player.realmIndex += 1;
+			player.lastBreakthrough = new Date().toLocaleString("zh-CN");
+			xpCapWarned = false; // v11 突破后重置封顶提示
+			// 境界提升后气血回满，以示庆贺且避免新境界残血
+			player.hp = maxHp;
+			// v9 突破增寿：补回新旧寿元上限差值的一半
+			player.lifespan = Math.min(lifespanMax, player.lifespan + Math.round((lifespanMax - oldMax) * 0.5));
+			// v9 渡劫成功洗涤业力（-30%）、消解部分因果债（-15）
+			player.karma = Math.round(player.karma * 0.7);
+			player.karmaDebt = Math.max(0, player.karmaDebt - 15);
+			breakthroughResult = "success";
+			addLog(
+				`恭喜！你成功突破至 ${REALMS[player.realmIndex].name}！寿元得天地反哺，业力随雷劫洗去三分。${usedPojing ? "（破境丹之效）" : ""}${focusBonus > 0 ? `（定神凝息 +${focusBonus}%）` : ""}`,
+				"success",
+			);
+		} else {
+			const loss = Math.floor(player.xp * 0.15);
+			player.xp = Math.max(0, player.xp - loss);
+			damageHp(maxHp * 0.1);
+			breakthroughResult = "fail";
+			addLog(`突破失败！真元逆流，损失 ${loss} 修为与一成气血。`, "danger");
+		}
+		save();
+	}, 2000);
+}
+
+function doBreakthroughCheck(rate: number) {
+	player.pojingActive = false; // 破境丹之效并入冲关时的判定，此处仅作标记清理
+	showBreakthroughModal = true;
+	breakthroughResult = "idle";
+	lastSuccessRate = rate;
+	// v11 进入定神小游戏阶段：玩家至多点三次「定神」，再点「凝神冲关」揭晓结果
+	focusGameActive = true;
+	focusHits = 0;
+	focusBonus = 0;
+	focusPtr = 50;
+	focusDir = Math.random() < 0.5 ? 1 : -1;
+	startFocusLoop();
+}
 
 function attemptBreakthrough() {
 	if (!canBreakthrough || !nextRealm) return;
@@ -3076,7 +3868,29 @@ function useTalismanForThunder() {
 		if (thunderRound > 3) {
 			setTimeout(() => {
 				showThunderModal = false;
-				doBreakthroughCheck(Math.max(0.15, lastSuccessRate - 0.25 - thunderPenalty));
+				// v11 修复：符挡天雷不再凭空罚 25% 突破率
+				doBreakthroughCheck(Math.max(0.15, lastSuccessRate - thunderPenalty));
+			}, 900);
+		}
+	}, 1000);
+}
+
+/** v11 服避劫丹：专为此劫炼制，硬挡一道天雷且不影响突破之势 */
+function useBijieForThunder() {
+	if (thunderStriking || player.pills.bijie <= 0) return;
+	player.pills.bijie -= 1;
+	thunderStriking = true;
+	setTimeout(() => {
+		thunderResults[thunderRound - 1] = "pass";
+		player.thunderPassed += 1;
+		addLog(`避劫丹化作金光护体，第 ${thunderRound} 道天雷被消弭于无形！`, "success");
+		thunderStriking = false;
+		thunderRound += 1;
+		save();
+		if (thunderRound > 3) {
+			setTimeout(() => {
+				showThunderModal = false;
+				doBreakthroughCheck(Math.max(0.15, lastSuccessRate - thunderPenalty));
 			}, 900);
 		}
 	}, 1000);
@@ -3085,7 +3899,6 @@ function useTalismanForThunder() {
 function usePillForThunder() {
 	if (thunderStriking || player.pills.pojing <= 0) return;
 	player.pills.pojing -= 1;
-	player.pojingActive = false;
 	thunderStriking = true;
 	setTimeout(() => {
 		thunderResults[thunderRound - 1] = "pass";
@@ -3097,56 +3910,27 @@ function usePillForThunder() {
 		if (thunderRound > 3) {
 			setTimeout(() => {
 				showThunderModal = false;
-				doBreakthroughCheck(Math.max(0.15, lastSuccessRate - 0.25 - thunderPenalty));
+				// v11 修复：丹挡天雷不再凭空罚 25% 突破率，破境丹增益也予以保留
+				doBreakthroughCheck(Math.max(0.15, lastSuccessRate - thunderPenalty));
 			}, 900);
 		}
 	}, 1000);
 }
 
-function doBreakthroughCheck(rate: number) {
-	const usedPojing = player.pojingActive;
-	player.pojingActive = false;
-	showBreakthroughModal = true;
-	breakthroughResult = "idle";
-	lastSuccessRate = rate;
-
-	setTimeout(() => {
-		if (Math.random() < rate) {
-			const oldMax = lifespanMax;
-			player.realmIndex += 1;
-			player.lastBreakthrough = new Date().toLocaleString("zh-CN");
-			// 境界提升后气血回满，以示庆贺且避免新境界残血
-			player.hp = maxHp;
-			// v9 突破增寿：补回新旧寿元上限差值的一半
-			player.lifespan = Math.min(lifespanMax, player.lifespan + Math.round((lifespanMax - oldMax) * 0.5));
-			// v9 渡劫成功洗涤业力（-30%）、消解部分因果债（-15）
-			player.karma = Math.round(player.karma * 0.7);
-			player.karmaDebt = Math.max(0, player.karmaDebt - 15);
-			breakthroughResult = "success";
-			addLog(
-				`恭喜！你成功突破至 ${REALMS[player.realmIndex].name}！寿元得天地反哺，业力随雷劫洗去三分。${usedPojing ? "（破境丹之效）" : ""}`,
-				"success",
-			);
-		} else {
-			const loss = Math.floor(player.xp * 0.15);
-			player.xp = Math.max(0, player.xp - loss);
-			damageHp(maxHp * 0.1);
-			breakthroughResult = "fail";
-			addLog(`突破失败！真元逆流，损失 ${loss} 修为与一成气血。`, "danger");
-		}
-		save();
-	}, 2000);
-}
-
 function resetGame() {
-	if (!confirm("确定要兵解转世，自行兵解入轮回吗？（本世修为、境界、丹药、功法、法宝全部清空；记忆碎片与轮回天赋保留）")) return;
-	// v9 兵解转世：走统一轮回结算流程
+	if (!confirm("确定要兵解转世，自行兵解入轮回吗？（本世修为、境界、丹药、功法、法宝全部清空，一切从零开始）")) return;
+	// v11 兵解：走统一死亡结算流程（无跨世继承）
 	die("bingjie");
 }
 
 function closeModal() {
 	showBreakthroughModal = false;
 	breakthroughResult = "idle";
+	// v11 弹窗关闭时停掉定神小游戏指针，避免空转
+	if (focusGameActive) {
+		focusGameActive = false;
+		stopFocusLoop();
+	}
 }
 </script>
 
@@ -3252,6 +4036,9 @@ function closeModal() {
 				{#if player.ningshenLeft > 0}
 					<span class="buff-badge buff-blue">凝神 ×2 · {player.ningshenLeft} 息</span>
 				{/if}
+				{#if player.julingLeft > 0}
+					<span class="buff-badge buff-blue">聚灵 · 灵石×2 · {player.julingLeft} 息</span>
+				{/if}
 				{#if player.springLeft > 0}
 					<span class="buff-badge buff-cyan">灵泉 ×2 · {player.springLeft} 息</span>
 				{/if}
@@ -3286,9 +4073,6 @@ function closeModal() {
 				{/if}
 				{#if player.karmaDebt > 0}
 					<span class="talent-tag debt-tag">因果债 {player.karmaDebt}</span>
-				{/if}
-				{#if player.rebirths > 0}
-					<span class="talent-tag rebirth-tag">轮回 {player.rebirths}</span>
 				{/if}
 			</div>
 
@@ -3352,20 +4136,22 @@ function closeModal() {
 					{/each}
 				</div>
 				<div class="radar-status">
-					<span class:status-danger={player.demon >= 80} class:status-warn={player.demon >= 50 && player.demon < 80}>心魔 {player.demon}</span>
-					<span class:status-warn={player.toxin >= 50}>丹毒 {player.toxin}</span>
-					<span>因果债 {player.karmaDebt}/200</span>
-					<span>声望 {player.reputation}</span>
-					<span>躯府 {bodyStateText}{player.bodyWound > 0 ? ` ${player.bodyWound}` : ""}</span>
-					<span>灵虫 {player.wormEquip.filter(Boolean).length}/3{player.wormHunger >= 70 ? " · 饥荒" : ""}</span>
-					{#if player.fateCheat}<span class="kill-ready">命线已改 · 下次突破无雷</span>{/if}
-					{#if player.demon >= 50}<span class="radar-debuff">心魔削突破 {Math.round(demonBreakPenalty * 100)}%</span>{/if}
-					{#if player.toxin >= 50}<span class="radar-debuff">丹毒削修炼 {Math.round((1 - toxinMult) * 100)}%</span>{/if}
+					<span title={gloss("心魔")} class:status-danger={player.demon >= 80} class:status-warn={player.demon >= 50 && player.demon < 80}>心魔 {player.demon}</span>
+					<span title={gloss("丹毒")} class:status-warn={player.toxin >= 50}>丹毒 {player.toxin}</span>
+					<span title={gloss("因果债")}>因果债 {player.karmaDebt}/200</span>
+					<span title={gloss("声望")}>声望 {player.reputation}</span>
+					<span title={gloss("躯府")}>躯府 {bodyStateText}{player.bodyWound > 0 ? ` ${player.bodyWound}` : ""}</span>
+					<span title={gloss("灵虫")}>灵虫 {player.wormEquip.filter(Boolean).length}/3{player.wormHunger >= 70 ? " · 饥荒" : ""}</span>
+					{#if player.fateCheat}<span title={gloss("命线已改")} class="kill-ready">命线已改 · 下次突破无雷</span>{/if}
+					{#if player.demon >= 50}<span class="radar-debuff" title={gloss("心魔")}>心魔削突破 {Math.round(demonBreakPenalty * 100)}%</span>{/if}
+					{#if player.toxin >= 50}<span class="radar-debuff" title={gloss("丹毒")}>丹毒削修炼 {Math.round((1 - toxinMult) * 100)}%</span>{/if}
 				</div>
 				<div class="radar-attrs">
 					<span>攻 {atk}</span><span>防 {def}</span><span>速 {speed}</span>
 					<span>暴击 {critRate}%</span><span>闪避 {dodgeRate}%</span><span>减伤 {damageReduce}%</span>
 				</div>
+				<!-- v11 名词志入口 -->
+				<button class="btn gloss-btn" title="看不懂的名词点这里" onclick={() => (showGlossaryModal = true)}>名词志</button>
 			</div>
 
 			<!-- 法宝三槽速览 -->
@@ -3428,7 +4214,6 @@ function closeModal() {
 					<button class="reset-btn" onclick={() => openSaveModal("export")}>导出存档</button>
 					<button class="reset-btn" onclick={() => openSaveModal("import")}>导入存档</button>
 					<button class="reset-btn" onclick={resetGame}>兵解转世</button>
-					<button class="reset-btn" onclick={() => (showRebirthShop = true)}>轮回殿</button>
 				</span>
 		</div>
 		</div>
@@ -3537,6 +4322,7 @@ function closeModal() {
 								<div class="equip-detail-actions">
 									<button class="btn equip-mini" onclick={() => openEnhance(item)}>强化</button>
 									<button class="btn btn-ghost equip-mini" onclick={() => unwearEquip(es.slot)}>卸下</button>
+									<button class="btn btn-ghost equip-mini" onclick={() => sellEquippedEquip(es.slot)}>卖出</button>
 								</div>
 							{:else}
 								<div class="equip-detail-empty">未装备</div>
@@ -3555,6 +4341,7 @@ function closeModal() {
 							<div class="bag-actions">
 								<button class="btn equip-mini" onclick={() => openEnhance(item)}>强化</button>
 								<button class="btn equip-mini" onclick={() => wearEquip(item)}>装备</button>
+								<button class="btn btn-ghost equip-mini" onclick={() => sellEquipFromBag(item)}>卖出</button>
 							</div>
 						</div>
 					{:else}
@@ -3666,10 +4453,13 @@ function closeModal() {
 						{@const w = WORM_POOL.find((x) => x.id === id)}
 						{#if w}
 							{@const inSlot = player.wormEquip.includes(w.id)}
-							<button class="manual-chip worm-chip" class:on={inSlot} title={w.desc} onclick={() => !inSlot && equipWorm(player.wormEquip.findIndex((x) => x === null), w.id)}>
-								<span class="manual-chip-name" style={`color: ${w.color}`}>{w.name}</span>
-								<span class="manual-chip-rarity" style={`color: ${w.color}`}>{w.rarity}</span>
-							</button>
+							<div class="worm-chip-row">
+								<button class="manual-chip worm-chip" class:on={inSlot} title={w.desc} onclick={() => !inSlot && equipWorm(player.wormEquip.findIndex((x) => x === null), w.id)}>
+									<span class="manual-chip-name" style={`color: ${w.color}`}>{w.name}</span>
+									<span class="manual-chip-rarity" style={`color: ${w.color}`}>{w.rarity}</span>
+								</button>
+								<button class="btn btn-ghost worm-sell" title={`放生可得 ${wormSellValue(w.id)} 灵石`} onclick={() => releaseWorm(w.id)}>放生</button>
+							</div>
 						{/if}
 					{:else}
 						<span class="bag-empty">尚未收服任何灵虫，去无尽试炼塔或秘境中寻找机缘吧。</span>
@@ -3730,7 +4520,7 @@ function closeModal() {
 						{@const f = player.favor[c.id] ?? 0}
 						<div class="companion-item">
 							<div class="companion-info">
-								<span class="companion-name" style={`color: ${c.color}`}>{c.name} · {c.trait}</span>
+								<span class="companion-name" style={`color: ${c.color}`}>{c.name}（{c.gender}） · {c.trait}</span>
 								<span class="worm-desc">{c.desc}</span>
 								<div class="favor-bar"><div class="favor-fill" style={`width: ${f}%; background: ${c.color}`}></div></div>
 							</div>
@@ -3750,12 +4540,29 @@ function closeModal() {
 					disabled={player.companions.length >= COMPANIONS.length || player.stones < MEET_COST || (player.cooldowns["meet"] ?? 0) > 0}
 					onclick={meetCompanion}
 				>
-					{player.companions.length >= COMPANIONS.length
-						? "六道仙缘皆已结下"
-						: `云游结识道侣（${MEET_COST} 灵石${(player.cooldowns["meet"] ?? 0) > 0 ? ` · ${player.cooldowns["meet"]}息` : ""}）`}
-				</button>
+						{player.companions.length >= COMPANIONS.length
+							? "六道仙缘皆已结下"
+							: `云游结识道侣（${MEET_COST} 灵石${(player.cooldowns["meet"] ?? 0) > 0 ? ` · ${player.cooldowns["meet"]}息` : ""}）`}
+					</button>
+					{#if showMeetModal}
+						<!-- v11 结识性别选择 -->
+						<div class="meet-choice-row">
+							<span class="worm-desc">此番云游，欲与何人结缘？</span>
+							<button
+								class="btn pill-buy"
+								disabled={player.stones < MEET_COST || !COMPANIONS.some((c) => c.gender === "男" && !player.companions.includes(c.id))}
+								onclick={() => confirmMeetCompanion("男")}
+							>结识男修</button>
+							<button
+								class="btn pill-buy"
+								disabled={player.stones < MEET_COST || !COMPANIONS.some((c) => c.gender === "女" && !player.companions.includes(c.id))}
+								onclick={() => confirmMeetCompanion("女")}
+							>结识女修</button>
+							<button class="btn black-btn" onclick={() => (showMeetModal = false)}>作罢</button>
+						</div>
+					{/if}
+				</div>
 			</div>
-		</div>
 
 		<!-- ========== v10.1 地下黑市 ========== -->
 		<div class="pill-card">
@@ -3805,10 +4612,15 @@ function closeModal() {
 		<div class="pill-card">
 			<div class="pill-header">
 				<h3 class="pill-title">丹药 · 炼丹坊</h3>
-				<span class="pill-subtitle">丹分凡灵宝仙神五品 · 高阶丹药需对应境界 · 炼制有失败率，失败损失药材</span>
+				<span class="pill-subtitle">丹分四类可筛选 · 炼制有失败率，失败损失药材</span>
+			</div>
+			<div class="pill-filter-row">
+				{#each PILL_FILTERS as f (f)}
+					<button class="pill-filter" class:active={craftFilter === f} onclick={() => (craftFilter = f)}>{f}</button>
+				{/each}
 			</div>
 			<div class="pill-list">
-					{#each CRAFT_PILLS as pill (pill.id)}
+					{#each (craftFilter === "全部" ? CRAFT_PILLS : CRAFT_PILLS.filter((p) => p.category === craftFilter)) as pill (pill.id)}
 					{@const locked = player.realmIndex < pill.minRealm}
 					{@const craftRate = Math.round(craftSuccessRate(pill.minRealm) * 100)}
 					<div class="pill-item" class:pill-locked={locked}>
@@ -3844,10 +4656,15 @@ function closeModal() {
 		<div class="pill-card">
 			<div class="pill-header">
 				<h3 class="pill-title">坊市</h3>
-				<span class="pill-subtitle">灵石交易 · 延寿丹与因果奇物有售 · 当前灵石 {player.stones.toLocaleString()}</span>
+				<span class="pill-subtitle">灵石交易 · 丹药奇物皆有所售 · 当前灵石 {player.stones.toLocaleString()}</span>
+			</div>
+			<div class="pill-filter-row">
+				{#each PILL_FILTERS as f (f)}
+					<button class="pill-filter" class:active={shopFilter === f} onclick={() => (shopFilter = f)}>{f}</button>
+				{/each}
 			</div>
 			<div class="pill-list">
-				{#each SHOP_PILLS as pill (pill.id)}
+				{#each (shopFilter === "全部" ? SHOP_PILLS : SHOP_PILLS.filter((p) => p.category === shopFilter)) as pill (pill.id)}
 					{@const price = shopPrice(pill)}
 					{@const afford = player.stones >= price}
 					<div class="pill-item" class:pill-locked={!afford}>
@@ -3919,11 +4736,14 @@ function closeModal() {
 							{thunderStriking ? "天雷落下..." : "硬抗此雷"}
 						</button>
 						<button class="btn pill-use" disabled={thunderStriking || player.pills.pojing <= 0} onclick={usePillForThunder}>
-							祭出破境丹（余 {player.pills.pojing}）
-						</button>
-						<button class="btn anti-btn" disabled={thunderStriking || player.talismans.anti <= 0} onclick={useTalismanForThunder}>
-							祭出破劫符（余 {player.talismans.anti}）
-						</button>
+						祭出破境丹（余 {player.pills.pojing}）
+					</button>
+					<button class="btn pill-use" disabled={thunderStriking || player.pills.bijie <= 0} onclick={useBijieForThunder}>
+						服下避劫丹（余 {player.pills.bijie}）
+					</button>
+					<button class="btn anti-btn" disabled={thunderStriking || player.talismans.anti <= 0} onclick={useTalismanForThunder}>
+						祭出破劫符（余 {player.talismans.anti}）
+					</button>
 					</div>
 				{:else}
 					<p class="thunder-text">天雷已尽，成败在此一举...</p>
@@ -3937,10 +4757,27 @@ function closeModal() {
 		<div class="modal-overlay" use:portal onclick={closeModal}>
 			<div class="modal-content" onclick={(e) => e.stopPropagation()}>
 				{#if breakthroughResult === "idle"}
-					<div class="breakthrough-loading">
-						<div class="spinner"></div>
-						<p>正在冲击关隘...（成功率 {(lastSuccessRate * 100).toFixed(0)}%）</p>
-					</div>
+					{#if focusGameActive}
+						<!-- v11 定神小游戏：指针越近中心，冲关之势越盛 -->
+						<div class="focus-game">
+							<h3 class="focus-title">凝神定息</h3>
+							<p class="desc">冲关之前，先凝神定息。指针掠过中线时点下「定神」，越接近中心加成越高——每息至多 +4%，三息为限。</p>
+							<div class="focus-bar">
+								<div class="focus-zone"></div>
+								<div class="focus-needle" style={`left: ${focusPtr}%`}></div>
+							</div>
+							<p class="focus-status">定神 {focusHits}/3 · 定息加成 +{focusBonus}% · 冲关成功率 {(Math.min(0.95, lastSuccessRate + focusBonus / 100) * 100).toFixed(0)}%</p>
+							<div class="focus-actions">
+								<button class="btn meditate-btn" disabled={focusHits >= 3} onclick={focusHit}>定神</button>
+								<button class="btn" onclick={startBreakthroughRoll}>凝神冲关</button>
+							</div>
+						</div>
+					{:else}
+						<div class="breakthrough-loading">
+							<div class="spinner"></div>
+							<p>正在冲击关隘...（成功率 {(lastSuccessRate * 100).toFixed(0)}%）</p>
+						</div>
+					{/if}
 				{:else if breakthroughResult === "success"}
 					<div class="breakthrough-success">
 						<div class="icon">破境！</div>
@@ -3957,6 +4794,25 @@ function closeModal() {
 						<button class="btn" onclick={closeModal}>继续修炼</button>
 					</div>
 				{/if}
+			</div>
+		</div>
+	{/if}
+
+	<!-- ========== v11 名词志弹窗 ========== -->
+	{#if showGlossaryModal}
+		<div class="modal-overlay" use:portal onclick={() => (showGlossaryModal = false)}>
+			<div class="modal-content glossary-modal" onclick={(e) => e.stopPropagation()}>
+				<h3>名词志</h3>
+				<p class="desc">修行界黑话速查——状态条上的名词悬停亦可查看单条释义。</p>
+				<div class="glossary-list">
+					{#each GLOSSARY as g (g.term)}
+						<div class="glossary-item">
+							<span class="glossary-term">{g.term}</span>
+							<span class="glossary-desc">{g.desc}</span>
+						</div>
+					{/each}
+				</div>
+				<button class="btn" onclick={() => (showGlossaryModal = false)}>合上</button>
 			</div>
 		</div>
 	{/if}
@@ -4012,7 +4868,7 @@ function closeModal() {
 						<button class="btn battle-btn-pill" disabled={player.pills.huichun <= 0} onclick={battleUsePill}>
 							回春丹 ×{player.pills.huichun}
 						</button>
-						<button class="btn battle-btn-retreat" onclick={battleRetreat}>撤退</button>
+						<button class="btn battle-btn-retreat" title={gloss("遁走")} onclick={battleRetreat}>遁走</button>
 					</div>
 					<!-- v10 符咒与道衍杀招 -->
 					<div class="battle-actions battle-talisman-row">
@@ -4155,7 +5011,7 @@ function closeModal() {
 			</div>
 		{/if}
 
-		<!-- ========== v9 轮回结算弹窗 ========== -->
+		<!-- ========== v11 死亡结算弹窗（本世修行总结，转世后一切归零） ========== -->
 		{#if showRebirthModal && rebirthReport && deathCause}
 			<div class="modal-overlay" use:portal>
 				<div class="modal-content rebirth-modal" onclick={(e) => e.stopPropagation()}>
@@ -4163,55 +5019,58 @@ function closeModal() {
 					<p class="rebirth-desc">{DEATH_TEXTS[deathCause].desc}</p>
 					<div class="rebirth-stats">
 						<div class="offline-reward">
-							<span class="offline-key">记忆碎片</span>
-							<span class="offline-val">+{rebirthReport.shards}</span>
+							<span class="offline-key">止步境界</span>
+							<span class="offline-val">{rebirthReport.realm}</span>
 						</div>
 						<div class="offline-reward">
-							<span class="offline-key">累计碎片</span>
-							<span class="offline-val">{player.memoryShards}</span>
+							<span class="offline-key">累计修为</span>
+							<span class="offline-val">{rebirthReport.xp.toLocaleString()}</span>
 						</div>
 						<div class="offline-reward">
-							<span class="offline-key">轮回次数</span>
-							<span class="offline-val">{player.rebirths}</span>
+							<span class="offline-key">斗法战绩</span>
+							<span class="offline-val">{rebirthReport.wins} 胜</span>
+						</div>
+						<div class="offline-reward">
+							<span class="offline-key">试炼塔层</span>
+							<span class="offline-val">{rebirthReport.floors}</span>
+						</div>
+						<div class="offline-reward">
+							<span class="offline-key">共度岁月</span>
+							<span class="offline-val">{rebirthReport.breaths} 息</span>
+						</div>
+						<div class="offline-reward">
+							<span class="offline-key">首通强敌</span>
+							<span class="offline-val">{rebirthReport.clears} 名</span>
 						</div>
 					</div>
-					<p class="rebirth-tip">记忆碎片可在「轮回殿」兑换永久天赋，伴随后续每一世。</p>
-					<button class="btn breakthrough-btn" onclick={reincarnate}>真灵投胎 · 开启第 {player.rebirths + 1} 世</button>
+					<p class="rebirth-tip">红尘一梦，万般皆空。转世重修后，境界、修为、法宝、灵虫尽皆归零。</p>
+					<button class="btn breakthrough-btn" onclick={reincarnate}>转世重修 · 从零开始</button>
 				</div>
 			</div>
 		{/if}
 
-		<!-- ========== v9 轮回殿（记忆碎片商店） ========== -->
-		{#if showRebirthShop}
-			<div class="modal-overlay" use:portal onclick={() => (showRebirthShop = false)}>
-				<div class="modal-content rebirth-shop-modal" onclick={(e) => e.stopPropagation()}>
-					<h3 class="rebirth-title">轮回殿</h3>
-					<p class="rebirth-desc">当前记忆碎片：<strong>{player.memoryShards}</strong> · 已轮回 {player.rebirths} 次</p>
-					<div class="talent-shop-list">
-						{#each REBIRTH_TALENTS as t (t.id)}
-							{@const owned = player.talents.includes(t.id)}
-							{@const afford = player.memoryShards >= t.cost}
-							<div class="talent-shop-item" class:owned class:afford={!owned && afford}>
-								<div class="pill-info">
-									<div class="pill-name" style={`color: ${t.color}`}>
-										{t.name}
-										{#if owned}<span class="pill-count">已悟</span>{/if}
-									</div>
-									<div class="pill-desc">{t.desc}</div>
-								</div>
-								<div class="pill-actions">
-									<button class="btn pill-buy" disabled={owned || !afford} onclick={() => buyTalent(t)}>
-										{owned ? "已悟" : `${t.cost} 碎片`}
-									</button>
-								</div>
-							</div>
-						{/each}
+		<!-- ========== v11 奇遇抉择弹窗（不同选择 → 不同收益与风险） ========== -->
+		{#if showChoiceEvent}
+			<div class="modal-overlay" use:portal>
+				<div class="modal-content choice-modal" onclick={(e) => e.stopPropagation()}>
+					<h3 class="choice-title" style={`color: ${showChoiceEvent.color}`}>{showChoiceEvent.title}</h3>
+					<p class="desc">{choiceResultText ?? showChoiceEvent.desc}</p>
+					<div class="choice-options">
+						{#if choiceResultText}
+							<button class="btn breakthrough-btn" onclick={closeChoiceEvent}>继续修行</button>
+						{:else}
+							{#each showChoiceEvent.options as opt, i (i)}
+								<button class="btn choice-btn" disabled={opt.disabled} onclick={() => pickChoiceOption(i)}>
+									<span class="choice-label">{opt.label}</span>
+									{#if opt.hint}<span class="choice-hint">{opt.hint}</span>{/if}
+								</button>
+							{/each}
+						{/if}
 					</div>
-					<button class="btn btn-ghost" onclick={() => (showRebirthShop = false)}>离开轮回殿</button>
 				</div>
 			</div>
 		{/if}
-</div>
+	</div>
 
 <style>
 .xiuxian-game { display: flex; flex-direction: column; gap: 1.1rem; }
@@ -4538,11 +5397,11 @@ button.manual-chip.owned:hover { border-color: rgba(99, 102, 241, 0.6); transfor
 .pill-header { display: flex; align-items: baseline; gap: 0.75rem; margin-bottom: 0.75rem; flex-wrap: wrap; }
 .pill-title { font-size: 1.1rem; font-weight: 700; margin: 0; }
 .pill-subtitle { font-size: 0.78rem; color: var(--content-meta, #9ca3af); }
-.pill-list { display: flex; flex-direction: column; gap: 0.55rem; }
-.pill-item {
-	display: flex; align-items: center; gap: 0.75rem;
-	padding: 0.5rem 0.7rem; border-radius: 0.6rem; background: rgba(128, 128, 128, 0.06);
+.pill-list { display: flex; flex-direction: column; gap: 0.55rem; .pill-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.6rem 0.5rem; border-radius: 0.6rem; } background: rgba(128, 128, 128, 0.06);
 }
+.pill-filter-row { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
+.pill-filter { font-size: 0.74rem; padding: 0.25rem 0.7rem; border-radius: 999px; border: 1px solid rgba(148, 163, 184, 0.35); background: transparent; color: #9aa7bd; cursor: pointer; }
+.pill-filter.active { background: rgba(99, 102, 241, 0.25); border-color: #818cf8; color: #c7d2fe; }
 .pill-item.pill-locked { opacity: 0.55; }
 .pill-orb { width: 2rem; height: 2rem; border-radius: 50%; flex-shrink: 0; }
 .pill-info { flex: 1; min-width: 0; }
@@ -4569,8 +5428,10 @@ button.manual-chip.owned:hover { border-color: rgba(99, 102, 241, 0.6); transfor
 	display: flex; align-items: center; justify-content: center; z-index: 9999;
 }
 .modal-content {
-	background: var(--card-bg-solid, #1e1e2e);
-	border: 1px solid var(--line-divider, rgba(128, 128, 128, 0.25));
+	/* v11 提亮弹窗：改为实色亮灰蓝底并固定文字色，修复“太暗看不清字” */
+	background: #2a3350;
+	border: 1px solid rgba(148, 163, 184, 0.45);
+	color: #e8edf7;
 	border-radius: 1rem; padding: 2rem; max-width: 26rem; width: calc(100% - 3rem); text-align: center;
 	max-height: calc(100vh - 4rem); overflow-y: auto;
 }
@@ -4584,7 +5445,30 @@ button.manual-chip.owned:hover { border-color: rgba(99, 102, 241, 0.6); transfor
 .breakthrough-success .icon { color: #34d399; }
 .breakthrough-fail .icon { color: #f87171; }
 .modal-content h3 { margin: 0.25rem 0 0.5rem; }
-.modal-content .desc { font-size: 0.85rem; color: var(--content-meta, #9ca3af); margin-bottom: 1rem; }
+.modal-content .desc { font-size: 0.85rem; color: #bcc8de; margin-bottom: 1rem; }
+
+/* ===== v11 定神小游戏 ===== */
+.focus-game { text-align: center; }
+.focus-title { margin: 0.25rem 0 0.4rem; font-size: 1.1rem; font-weight: 700; }
+.focus-bar {
+	position: relative; height: 1.1rem; border-radius: 0.4rem; margin: 0.9rem 0 0.6rem;
+	background: linear-gradient(90deg, #7f1d1d 0%, #f59e0b 38%, #34d399 50%, #f59e0b 62%, #7f1d1d 100%);
+	border: 1px solid rgba(148, 163, 184, 0.4); overflow: hidden;
+}
+.focus-needle {
+	position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px;
+	background: #fff; box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+}
+.focus-status { font-size: 0.8rem; color: #bcc8de; margin-bottom: 0.8rem; }
+.focus-actions { display: flex; gap: 0.6rem; justify-content: center; }
+
+/* ===== v11 名词志 ===== */
+.gloss-btn { margin-top: 0.5rem; width: 100%; font-size: 0.75rem; padding: 0.3rem 0; }
+.glossary-modal { text-align: left; }
+.glossary-list { display: flex; flex-direction: column; gap: 0.45rem; margin: 0.6rem 0 1rem; }
+.glossary-item { display: flex; flex-direction: column; gap: 0.1rem; padding-bottom: 0.45rem; border-bottom: 1px dashed rgba(148, 163, 184, 0.2); }
+.glossary-term { font-weight: 700; color: #a5b4fc; font-size: 0.85rem; }
+.glossary-desc { font-size: 0.78rem; color: #bcc8de; line-height: 1.5; }
 
 /* ===== 雷劫 ===== */
 .thunder-modal { border-color: rgba(250, 204, 21, 0.35); }
@@ -4644,6 +5528,13 @@ button.manual-chip.owned:hover { border-color: rgba(99, 102, 241, 0.6); transfor
 .rebirth-desc strong { color: #f0abfc; }
 .rebirth-stats { display: flex; gap: 0.75rem; justify-content: center; margin-bottom: 1rem; }
 .rebirth-tip { font-size: 0.78rem; color: #cbd5e1; margin: 0 0 1rem; }
+/* ===== v11 奇遇抉择 ===== */
+.choice-modal { max-width: 30rem; text-align: left; }
+.choice-title { font-size: 1.2rem; font-weight: 700; margin: 0 0 0.5rem; }
+.choice-options { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 1rem; }
+.choice-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem; width: 100%; text-align: left; padding: 0.6rem 0.9rem; }
+.choice-label { font-size: 0.92rem; }
+.choice-hint { font-size: 0.72rem; color: #9aa7bd; }
 
 .talent-shop-list { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; text-align: left; }
 .talent-shop-item {
@@ -4716,6 +5607,9 @@ button.manual-chip.owned:hover { border-color: rgba(99, 102, 241, 0.6); transfor
 .bag-title { font-size: 0.78rem; font-weight: 700; color: #c7d2fe; }
 .bag-empty { font-size: 0.74rem; color: var(--content-meta, #9ca3af); }
 .worm-bag-list { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.worm-chip-row { display: flex; align-items: stretch; gap: 0.35rem; }
+.worm-chip-row .worm-chip { flex: 1; }
+.worm-sell { font-size: 0.72rem; padding: 0.25rem 0.55rem; flex-shrink: 0; }
 button.worm-chip { flex-direction: row; gap: 0.45rem; align-items: center; min-width: 0; }
 .worm-chip.on { border-color: rgba(167, 139, 250, 0.6); background: rgba(99, 102, 241, 0.12); }
 @media (max-width: 640px) { .worm-slots { grid-template-columns: 1fr; } }
@@ -4764,6 +5658,12 @@ button.worm-chip { flex-direction: row; gap: 0.45rem; align-items: center; min-w
 .favor-bar { height: 0.4rem; border-radius: 2px; background: rgba(128, 128, 128, 0.15); overflow: hidden; min-width: 12rem; }
 .favor-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
 .meet-btn { margin-top: 0.2rem; }
+/* v11 结识性别选择行 */
+.meet-choice-row {
+	display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
+	margin-top: 0.55rem; padding: 0.55rem 0.8rem; border-radius: 0.7rem;
+	background: rgba(128, 128, 128, 0.1); border: 1px solid rgba(148, 163, 184, 0.25);
+}
 .black-list { display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.85rem; }
 .black-item {
 	display: flex; align-items: center; gap: 0.7rem;
