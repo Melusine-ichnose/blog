@@ -332,14 +332,14 @@
 					{#if gameState === "ready"}
 						<p class="overlay-title">俄罗斯方块</p>
 						<p class="overlay-sub">←→ 移动 · ↑ 旋转 · ↓ 软降 · 空格硬降</p>
-						<p class="overlay-hint">按任意方向键开始</p>
+						<p class="overlay-hint">点下方方向键开始（或按键盘方向键）</p>
 					{:else if gameState === "paused"}
 						<p class="overlay-title">已暂停</p>
 						<p class="overlay-hint">按 P 继续</p>
 					{:else}
 						<p class="overlay-title over">游戏结束</p>
 						<p class="overlay-sub">得分 {score}{score >= best && score > 0 ? " · 新纪录！" : ""}</p>
-						<p class="overlay-hint">按任意方向键重新开始</p>
+						<p class="overlay-hint">点下方方向键重新开始</p>
 					{/if}
 				</div>
 			{/if}

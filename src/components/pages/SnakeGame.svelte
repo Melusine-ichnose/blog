@@ -22,6 +22,7 @@
 	type GameState = "ready" | "running" | "paused" | "over";
 
 	let canvasEl: HTMLCanvasElement;
+	let wrapEl: HTMLDivElement; // 棋盘容器（含遮罩层）：触摸事件绑这里，避免遮罩拦截
 
 	// Svelte 状态（驱动 UI）
 	let gameState = $state<GameState>("ready");
@@ -30,6 +31,7 @@
 
 	onMount(() => {
 		const canvas = canvasEl;
+		const wrap = wrapEl;
 		const ctx = canvas.getContext("2d");
 		if (!ctx) return;
 
@@ -236,7 +238,7 @@
 			setDir(v);
 		}
 
-		// 触屏滑动
+		// 触屏滑动 + 点按（监听器绑在容器上：遮罩层盖住棋盘时事件照样冒泡到这里）
 		let touchX = 0;
 		let touchY = 0;
 		function onTouchStart(e: TouchEvent) {
@@ -257,10 +259,21 @@
 			touchY = e.touches[0].clientY;
 		}
 
+		// 点按棋盘/遮罩：手机无键盘也能开局或继续；running 中点击不响应（防误触）
+		function onWrapTap() {
+			if (gameState === "ready" || gameState === "over") {
+				reset();
+				gameState = "running";
+			} else if (gameState === "paused") {
+				gameState = "running";
+			}
+		}
+
 		window.addEventListener("keydown", onKey);
 		window.addEventListener("resize", resize);
-		canvas.addEventListener("touchstart", onTouchStart, { passive: true });
-		canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+		wrap.addEventListener("touchstart", onTouchStart, { passive: true });
+		wrap.addEventListener("touchmove", onTouchMove, { passive: false });
+		wrap.addEventListener("click", onWrapTap);
 
 		reset();
 		resize();
@@ -270,8 +283,9 @@
 			cancelAnimationFrame(raf);
 			window.removeEventListener("keydown", onKey);
 			window.removeEventListener("resize", resize);
-			canvas.removeEventListener("touchstart", onTouchStart);
-			canvas.removeEventListener("touchmove", onTouchMove);
+			wrap.removeEventListener("touchstart", onTouchStart);
+			wrap.removeEventListener("touchmove", onTouchMove);
+			wrap.removeEventListener("click", onWrapTap);
 		};
 	});
 
@@ -302,7 +316,7 @@
 	</div>
 
 	<!-- 棋盘 -->
-	<div class="board-wrap">
+	<div class="board-wrap" bind:this={wrapEl}>
 		<canvas bind:this={canvasEl} class="board" aria-label="贪吃蛇棋盘"></canvas>
 
 		<!-- 状态遮罩 -->
@@ -311,14 +325,14 @@
 				{#if gameState === "ready"}
 					<p class="overlay-title">贪吃蛇</p>
 					<p class="overlay-sub">方向键 / WASD 控制 · 空格暂停 · 手机滑动转向</p>
-					<p class="overlay-hint">按任意方向键开始</p>
+					<p class="overlay-hint">点击任意处 / 滑动开始（或按方向键）</p>
 				{:else if gameState === "paused"}
 					<p class="overlay-title">已暂停</p>
-					<p class="overlay-hint">按空格继续</p>
+					<p class="overlay-hint">点击棋盘 / 按空格继续</p>
 				{:else}
 					<p class="overlay-title over">游戏结束</p>
 					<p class="overlay-sub">本局得分 {score}{score >= best && score > 0 ? " · 新纪录！" : ""}</p>
-					<p class="overlay-hint">按任意方向键重新开始</p>
+					<p class="overlay-hint">点击任意处 / 滑动重新开始</p>
 				{/if}
 			</div>
 		{/if}
@@ -384,6 +398,7 @@
 		width: 100%;
 		/* 宽度随视口高度收缩，保证整屏免滚轮可见 */
 		max-width: min(30rem, calc(100vh - 16rem));
+		touch-action: none; /* 遮罩层上的滑动也交给游戏，不滚页面 */
 	}
 	.board {
 		display: block;
@@ -408,6 +423,10 @@
 		backdrop-filter: blur(3px);
 		text-align: center;
 		padding: 1rem;
+		cursor: pointer; /* 提示可点按开局 */
+		user-select: none;
+		-webkit-user-select: none;
+		-webkit-tap-highlight-color: transparent;
 	}
 	.overlay-title {
 		font-size: 1.6rem;
